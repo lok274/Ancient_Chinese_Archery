@@ -1,0 +1,8 @@
+{
+  "name": "中華傳統射箭：邊關演武",
+  "description": "3D Chinese Traditional Archery Sports Game featuring Ming-Qing frontier martial ground, authentic recurve horn bow mechanics, breath stamina aiming sway, and realistic arrow ballistics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
