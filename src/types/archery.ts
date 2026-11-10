@@ -1,28 +1,51 @@
 /**
  * Archery Types & Constants
- * Traditional Chinese Martial Archery (中華禮射与武舉之射)
+ * Modern Olympic Games Archery Competition & Chinese Archery Heritage
+ * (現代奧林匹克運動會射箭比賽 · 中國國家射箭隊榮耀與中華千年射藝傳承)
  */
 
-export type GameState = 
+export type GameState =
   | 'idle'       // Ready to draw
   | 'drawing'    // Pulling the bowstring
-  | 'aiming'     // Full draw, managing breath stamina
+  | 'aiming'     // Full draw, managing breath stamina & clicker expansion
   | 'released'   // Arrow just released
   | 'flight'     // Arrow in aerodynamic flight
-  | 'impact'     // Arrow struck target or terrain
-  | 'round_end'; // Finished set of arrows, awaiting exam evaluation
+  | 'impact'     // Arrow struck target or turf
+  | 'round_end'; // Finished set of 6 arrows, awaiting match evaluation
 
 export type CameraViewMode = 'first_person' | 'flight_chase' | 'target_view';
 
 export interface MartialRank {
   id: string;
-  title: string;        // e.g. 武生, 武秀才, 武舉人, 武狀元
-  subtitle: string;     // Historical exam stage
+  title: string;          // Olympic Competition Round (e.g. 奧運資格排名賽, 1/4淘汰賽, 半決賽, 金牌決賽)
+  subtitle: string;       // World Archery / Olympic match format
+  frontierPass: string;   // Iconic Olympic Archery Venue (e.g. 北京奧林匹克公園射箭場)
+  frontierRegion: string; // Olympic Host & Team China Milestone Context
   description: string;
-  targetDistance: number; // in meters (30m ~ 20步, 50m ~ 35步, 80m ~ 55步, 110m ~ 75步)
+  targetDistance: number; // in meters (30m warm-up, 50m, 70m Olympic standard)
   windRange: [number, number]; // min and max wind speed in m/s
-  qualifyScore: number; // Score needed out of 60 to pass
-  targetRadius: number; // Target face radius in meters
+  qualifyScore: number;   // Score needed out of 60 (6-arrow end) to advance
+  targetRadius: number;   // Target face radius in meters (Olympic 122cm face = 0.61m radius)
+}
+
+export interface HistoricalNote {
+  id: string;
+  frontierPass: string;
+  frontierRegion: string;
+  rankTitle: string;
+  bowName: string;
+  targetDistance: number;
+  ringName: string;
+  score: number;
+  timeOfDay: string;
+  windName: string;
+  arrowIndex: number;
+  headline: string;
+  dynastyEra: string;
+  passGeographyAndHistory: string;
+  archeryTacticalInsight: string;
+  classicalCitation: string;
+  timestamp: number;
 }
 
 export interface BowConfig {
@@ -40,97 +63,138 @@ export interface BowConfig {
 export interface ShotResult {
   arrowIndex: number;
   score: number;        // 0 to 10
-  ringName: string;     // 鵠心, 穿正, 命中, 擦邊, 脫靶
-  distanceFromCenter: number; // meters from bullseye
+  ringName: string;     // X-10環, 9環, 8環...
+  distanceFromCenter: number; // meters from center pinhole
   flightTime: number;   // seconds
   flightDistance: number; // meters
   hitPosition: { x: number; y: number; z: number };
   windSpeed: number;    // m/s at launch
   windDirectionAngle: number; // radians
+  thumbAngleDeg?: number;     // release clearance angle at launch
+  gripTechniqueLabel?: string;
+}
+
+export interface ThumbGripState {
+  /** Player-controlled release clearance angle in degrees (-25° to +45°) */
+  thumbAngleDeg: number;
+  /** Ideal release clearance angle in degrees for the active bow & draw tension */
+  optimalAngleDeg: number;
+  /** Angular deviation (thumbAngleDeg - optimalAngleDeg) in degrees */
+  angleErrorDeg: number;
+  /** Horizontal arrow-pass clearance deflection at target plane in cm */
+  clearanceDriftXCm: number;
+  /** Vertical pitch deflection at target plane in cm */
+  clearanceDriftYCm: number;
+  /** Release technique diagnosis (Olympic Clicker / Traditional Thumb-Ring) */
+  techniqueLabel: string;
+  /** True when |angleErrorDeg| <= 3.5° (clean arrow pass clearance) */
+  isCrispRelease: boolean;
 }
 
 export interface WindState {
-  speed: number;       // m/s
-  directionAngle: number; // radians (0 = headwind, PI/2 = crosswind from right, etc.)
-  directionName: string;  // e.g. 東南微風, 西北大風
+  speed: number;          // m/s
+  directionAngle: number; // radians
+  directionName: string;  // e.g. 東南側風
+  isGusting?: boolean;
+  gustIntensity?: number;
+  gustDeltaSpeed?: number;
+  gustDeltaAngle?: number;
+  gustLabel?: string;
+  gustPhase?: 'calm' | 'building' | 'peak' | 'subsiding';
+  nextGustCountdownSec?: number;
 }
 
 export const MARTIAL_RANKS: MartialRank[] = [
   {
     id: 'rank_wusheng',
-    title: '童試 · 武生',
-    subtitle: '入泮初階 · 試步射二十步',
-    description: '明代武童應考初階，射平場二十步。風勢平緩，驗其定力與發矢正法。',
+    title: '奧運資格賽 · 排名輪',
+    subtitle: 'World Archery 資格排位賽 · 30米校準輪 (6箭制)',
+    frontierPass: '北京奧林匹克公園射箭場',
+    frontierRegion: '2008 北京奧運會 · 張娟娟奪得中國射箭奧運歷史首金福地',
+    description:
+      '重返 2008 北京奧運主賽場進行資格排名輪。風勢平穩，考驗現代反曲弓 T 字靠位、光學準星校準與穩定撒放基本功。',
     targetDistance: 30,
     windRange: [0.5, 2.0],
-    qualifyScore: 36, // 6 arrows average 6+
+    qualifyScore: 42, // 6 arrows average 7.0+
     targetRadius: 0.65,
   },
   {
     id: 'rank_xiucai',
-    title: '歲科 · 武秀才',
-    subtitle: '提學策試 · 試步射三十五步',
-    description: '列名郡邑庠序，邊塞要隘風起，射距增至三十五步，考較引弓之沉穩。',
+    title: '奧運淘汰賽 · 八強戰',
+    subtitle: '奧運積分淘汰賽制 · 50米抗風對決',
+    frontierPass: '東京夢之島公園射箭場',
+    frontierRegion: '2020 東京奧運會 · 東京灣濱海側風考驗區',
+    description:
+      '進入奧運 1/4 決賽階段，賽場鄰近海灣，側風與陣風交替出現。須精確計算風偏修正量並在體力黃金期果斷過響片放箭。',
     targetDistance: 50,
-    windRange: [1.5, 3.8],
-    qualifyScore: 42, // average 7+
-    targetRadius: 0.60,
+    windRange: [1.5, 3.6],
+    qualifyScore: 46, // average 7.7+
+    targetRadius: 0.61,
   },
   {
     id: 'rank_juren',
-    title: '鄉試 · 武舉人',
-    subtitle: '省城大比 · 試步射五十五步',
-    description: '巡撫總兵親試，邊關烈風呼嘯，射距達五十五步，考驗聽風判位、審固命中。',
-    targetDistance: 80,
-    windRange: [2.5, 5.5],
-    qualifyScore: 48, // average 8+
-    targetRadius: 0.55,
+    title: '奧運半決賽 · 團體衝金戰',
+    subtitle: '國際標準 70米反曲弓 · 高壓團體決戰',
+    frontierPass: '巴黎榮軍院射箭場',
+    frontierRegion: '2024 巴黎奧運會 · 中國女團（李佳蔓/楊曉蕾/安琦軒）奪銀賽場',
+    description:
+      '踏上國際標準 70 米奧運射道！塞納河畔陣風多變，重現 2024 巴黎奧運中國女團頂住全場壓力、連續射出 10 環晉級決賽之經典戰役。',
+    targetDistance: 70,
+    windRange: [2.2, 5.0],
+    qualifyScore: 50, // average 8.3+
+    targetRadius: 0.61,
   },
   {
     id: 'rank_zhuangyuan',
-    title: '殿試 · 武狀元',
-    subtitle: '天子親閱 · 試步射七十五步',
-    description: '紫禁城太和殿或邊防重鎮大閱，強風陣作，遠射七十五步穿楊取鵠，奪魁天下！',
-    targetDistance: 110,
-    windRange: [3.5, 7.5],
-    qualifyScore: 52, // average 8.6+
-    targetRadius: 0.50,
+    title: '奧運金牌決賽 · 巔峰對決',
+    subtitle: '奧林匹克最高殿堂 · 70米強風金牌決戰',
+    frontierPass: '洛杉磯奧運決賽主場館',
+    frontierRegion: '1984 李玲娟首奪奧運銀牌 — 2028 奧運衝金巔峰傳承',
+    description:
+      '奧運金牌決賽最後一輪（6箭定勝負）！70 米標準距離配強勁陣風，重溫張娟娟連克強敵奪金之傳奇心態，瞄準 X-10 環奪取奧運金牌！',
+    targetDistance: 70,
+    windRange: [3.2, 6.8],
+    qualifyScore: 54, // average 9.0+
+    targetRadius: 0.55,
   },
 ];
 
 export const BOW_PRESETS: BowConfig[] = [
   {
     id: 'ming_horn_45',
-    name: '明代 樺皮樺木角弓 (四十磅)',
-    dynasty: '明代軍制',
-    drawWeightLbs: 45,
+    name: '國家隊青訓標準反曲弓 (40磅)',
+    dynasty: '現代奧運 ILF 鋁鎂合金弓把',
+    drawWeightLbs: 40,
     drawLengthInches: 28,
-    initialVelocity: 54, // ~194 km/h
-    arrowMassGrams: 32,
-    staminaDrainRate: 0.22,
-    description: '以干、角、筋、膠、絲、漆六材精造，拉感柔順，適合定點審固引弦。',
+    initialVelocity: 58, // ~208 km/h
+    arrowMassGrams: 24,
+    staminaDrainRate: 0.21,
+    description:
+      '採用 CNC 航空鋁合金弓把、玻璃纖維複合弓片與長短平衡桿系統，拉感順滑穩定，適合熟悉奧運三指靠位與響片節奏。',
   },
   {
     id: 'qing_horn_65',
-    name: '清代 大梢牛角戰弓 (六十五磅)',
-    dynasty: '清代八旗武備',
-    drawWeightLbs: 65,
-    drawLengthInches: 32,
-    initialVelocity: 64, // ~230 km/h
-    arrowMassGrams: 42,
-    staminaDrainRate: 0.32,
-    description: '長梢大反曲，初速猛烈，抗風偏能力出眾，武舉殿試之利器。',
+    name: '中國隊奧運奪金主力反曲弓 (48磅)',
+    dynasty: '奧運國家隊主力競技配置',
+    drawWeightLbs: 48,
+    drawLengthInches: 29.5,
+    initialVelocity: 68, // ~245 km/h
+    arrowMassGrams: 22,
+    staminaDrainRate: 0.30,
+    description:
+      '張娟娟、李佳蔓等奧運國手同級高模量碳纖維泡沫芯弓片，搭配鎢鋼頭 X10 碳鋁箭，初速極高、70米抗風偏性能卓越。',
   },
   {
     id: 'iron_wood_85',
-    name: '邊關 鐵力木重戰弓 (八十五磅)',
-    dynasty: '邊防精銳',
-    drawWeightLbs: 85,
-    drawLengthInches: 33,
-    initialVelocity: 74, // ~266 km/h
-    arrowMassGrams: 48,
-    staminaDrainRate: 0.45,
-    description: '百煉沉勁，箭出如雷霆霹靂，需極強臂力與氣息方可駕馭。',
+    name: '奧運旗艦重磅反曲弓 · 華夏禮射紀念版 (54磅)',
+    dynasty: '現代碳纖科技 × 考工六材美學',
+    drawWeightLbs: 54,
+    drawLengthInches: 30.5,
+    initialVelocity: 75, // ~270 km/h
+    arrowMassGrams: 23,
+    staminaDrainRate: 0.42,
+    description:
+      '專為 70 米強風決賽打造的 54 磅男子奧運頂級反曲弓，塗裝融入中國紅與傳統角弓紋飾，箭速凌厲，對核心與背肌耐力要求極高。',
   },
 ];
 
@@ -138,54 +202,53 @@ export const MAX_ARROWS_PER_ROUND = 6;
 
 export interface TimeOfDayPhase {
   id: string;
-  shichen: string;       // e.g. 卯時, 辰時, 巳時, 午未, 申時, 酉時
-  name: string;          // e.g. 破曉晨霧, 旭日初升, 晴空朗照, 塞上驕陽, 斜陽金暉, 長河落日
-  progress: number;      // 0.0 (sunrise) to 1.0 (deep golden hour / sunset)
-  visibilityNote: string; // Effect on target visibility & atmosphere
+  shichen: string;       // Match Session label
+  name: string;          // Lighting & weather condition
+  progress: number;      // 0.0 to 1.0
+  visibilityNote: string;
 }
 
 export const TIME_OF_DAY_PHASES: TimeOfDayPhase[] = [
   {
     id: 'sunrise_mist',
-    shichen: '卯時',
-    name: '破曉晨霧',
+    shichen: '晨間場',
+    name: '早場資格賽',
     progress: 0.0,
-    visibilityNote: '晨靄微茫，東昇曉日斜照，遠靶隱現於薄霧之中',
+    visibilityNote: '清晨賽場微霧初散，柔和晨光斜照草坪，風速最為平緩',
   },
   {
     id: 'morning_clear',
-    shichen: '辰時',
-    name: '旭日初升',
+    shichen: '上午場',
+    name: '淘汰賽開賽',
     progress: 0.2,
-    visibilityNote: '朝陽漸高，塞上晨霧初散，皮侯鵠心輪廓轉明',
+    visibilityNote: '日光漸盛，五色十環靶面色彩鮮明，適合穩定發揮',
   },
   {
     id: 'forenoon_bright',
-    shichen: '巳時',
-    name: '晴空朗照',
+    shichen: '正午場',
+    name: '晴空標準賽場',
     progress: 0.4,
-    visibilityNote: '天朗氣清，日光充沛，演武場視野最為澄澈分明',
+    visibilityNote: '陽光充沛，70米射道視野最為清晰，氣流開始微幅湧動',
   },
   {
     id: 'high_sun',
-    shichen: '午未',
-    name: '塞上驕陽',
+    shichen: '午後場',
+    name: '八強對決時段',
     progress: 0.6,
-    visibilityNote: '烈日當空，戈壁微泛熱浪浮塵，光影對比強烈',
+    visibilityNote: '午後日照強烈，賽場草坪熱對流引發周期性側風變化',
   },
   {
     id: 'golden_hour',
-    shichen: '申時',
-    name: '斜陽金暉',
+    shichen: '傍晚場',
+    name: '半決賽金暉',
     progress: 0.8,
-    visibilityNote: '西山日斜，萬道金暉染透塵煙，長影橫斜、靶面漸暗',
+    visibilityNote: '夕陽斜照奧運看台，金色逆光考驗射手對準星光斑的專注度',
   },
   {
     id: 'frontier_sunset',
-    shichen: '酉時',
-    name: '長河落日',
+    shichen: '決賽夜場',
+    name: '金牌戰聚光燈',
     progress: 1.0,
-    visibilityNote: '殘陽如血，暮靄沉沉，演武場燃起火盆照亮遠方皮侯',
+    visibilityNote: '暮色降臨，決賽射道聚光燈點亮 70 米靶面，萬眾矚目決戰金牌',
   },
 ];
-

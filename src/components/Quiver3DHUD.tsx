@@ -41,8 +41,8 @@ export const Quiver3DHUD: React.FC<Quiver3DHUDProps> = ({
     const container = mountRef.current;
     if (!container) return;
 
-    const width = 148;
-    const height = 196;
+    const width = 116;
+    const height = 150;
 
     // Detect software WebGL
     const isSoftwareGl = (() => {
@@ -301,29 +301,33 @@ export const Quiver3DHUD: React.FC<Quiver3DHUDProps> = ({
   }, [totalArrows]);
 
   return (
-    <div className="absolute bottom-24 left-5 z-20 pointer-events-none flex flex-col items-center">
-      <div className="relative bg-stone-950/75 border border-amber-800/50 rounded-lg px-2.5 pt-2 pb-2.5 shadow-2xl flex flex-col items-center">
+    <div
+      className={`absolute bottom-4 left-4 z-20 pointer-events-none flex flex-col items-center transition-opacity duration-200 ${
+        gameState === 'drawing' || gameState === 'aiming' ? 'opacity-65' : 'opacity-95'
+      }`}
+    >
+      <div className="relative bg-stone-950/65 backdrop-blur-xs border border-amber-800/40 rounded-md px-2 pt-1.5 pb-2 shadow-lg flex flex-col items-center">
         {/* Header Label */}
-        <div className="w-full flex items-center justify-between px-1 mb-0.5 border-b border-stone-800/80 pb-1">
-          <span className="text-[11px] font-bold tracking-wider text-amber-300">
-            明制步射撒袋
+        <div className="w-full flex items-center justify-between px-0.5 mb-0.5 border-b border-stone-800/80 pb-0.5">
+          <span className="text-[10px] font-bold tracking-wider text-amber-300">
+            步射撒袋
           </span>
-          <span className="font-mono tabular-nums text-xs font-bold text-amber-200">
-            {totalRemaining}/{totalArrows} 矢
+          <span className="font-mono tabular-nums text-[11px] font-bold text-amber-200">
+            {totalRemaining}/{totalArrows}矢
           </span>
         </div>
 
         {/* 3D WebGL Canvas Mount for Real-Time 3D Ming Arrows */}
-        <div ref={mountRef} className="w-[148px] h-[196px] flex items-center justify-center" />
+        <div ref={mountRef} className="w-[116px] h-[150px] flex items-center justify-center" />
 
         {/* Status Caption */}
-        <div className="w-full flex items-center justify-between px-1 pt-1 border-t border-stone-800/80 text-[10px] text-stone-400">
-          <span>雕翎竹箭</span>
+        <div className="w-full flex items-center justify-between px-0.5 pt-0.5 border-t border-stone-800/80 text-[10px] text-stone-400">
+          <span>雕翎箭</span>
           <span className="text-amber-300/90 font-medium">
             {totalRemaining > 0
               ? gameState === 'drawing' || gameState === 'aiming'
-                ? `第 ${currentArrowIndex + 1} 矢引弦中`
-                : `待發第 ${currentArrowIndex + 1} 矢`
+                ? `第${currentArrowIndex + 1}矢引弦`
+                : `待發第${currentArrowIndex + 1}矢`
               : '六矢已畢'}
           </span>
         </div>

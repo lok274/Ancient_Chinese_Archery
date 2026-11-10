@@ -19,3 +19,58 @@
 input[type="range"] {
   accent-color: #d97706;
 }
+
+/* Physiological double-peak (lub-dub) heartbeat animations for Stamina HUD */
+@keyframes heartbeat-lub-dub {
+  0%, 100% {
+    transform: scale(1);
+  }
+  14% {
+    transform: scale(var(--hb-scale-lub, 1.26));
+  }
+  28% {
+    transform: scale(1.04);
+  }
+  42% {
+    transform: scale(var(--hb-scale-dub, 1.16));
+  }
+  68% {
+    transform: scale(1);
+  }
+}
+
+@keyframes stamina-bar-throb {
+  0%, 100% {
+    filter: brightness(1);
+    transform: scaleY(1);
+  }
+  14% {
+    filter: brightness(var(--hb-bright-lub, 1.35));
+    transform: scaleY(var(--hb-bar-scale, 1.18));
+  }
+  28% {
+    filter: brightness(1.06);
+    transform: scaleY(1.03);
+  }
+  42% {
+    filter: brightness(var(--hb-bright-dub, 1.22));
+    transform: scaleY(calc(1 + (var(--hb-bar-scale, 1.18) - 1) * 0.6));
+  }
+  68% {
+    filter: brightness(1);
+    transform: scaleY(1);
+  }
+}
+
+.animate-heartbeat-lub-dub {
+  animation-name: heartbeat-lub-dub;
+  animation-iteration-count: infinite;
+  animation-timing-function: cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.animate-stamina-bar-throb {
+  animation-name: stamina-bar-throb;
+  animation-iteration-count: infinite;
+  animation-timing-function: ease-in-out;
+}
+

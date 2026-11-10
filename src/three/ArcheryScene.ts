@@ -62,6 +62,8 @@ export class ArcheryScene {
   private lowerLimb!: THREE.Group;
   private bowStringLine!: THREE.Line;
   private stringPositions!: Float32Array;
+  private thumbRingMesh!: THREE.Group;
+  public thumbGripAngleDeg: number = 14;
 
   // Active Flight & Physics
   private currentArrowState: ArrowFlightState | null = null;
@@ -70,9 +72,27 @@ export class ArcheryScene {
   private targetDistance: number = 50; // meters (Z = -targetDistance)
   private targetRadius: number = 0.6;  // meters
 
+  // Subtle Temporary Calligraphic Brush-Stroke Trail behind Flying Arrow (水墨飛白 · 破空筆意箭跡)
+  private arrowTrailMesh!: THREE.Mesh;
+  private arrowTrailGeo!: THREE.BufferGeometry;
+  private arrowTrailMat!: THREE.ShaderMaterial;
+  private arrowTrailPositions!: Float32Array;
+  private arrowTrailUvs!: Float32Array;
+  private arrowTrailAges!: Float32Array;
+  private readonly arrowTrailMaxNodes: number = 96;
+  private readonly arrowTrailLifetime: number = 1.25; // seconds before brush stroke fully evaporates
+  private arrowTrailHistory: Array<{
+    pos: THREE.Vector3;
+    right: THREE.Vector3;
+    up: THREE.Vector3;
+    time: number;
+  }> = [];
+
   // Aiming & Sway
   private drawTension: number = 0; // 0 (idle) to 1 (full draw)
   private breathTime: number = 0;
+  private isDeepBreath: boolean = false;
+  private deepBreathBlend: number = 0; // 0.0 to 1.0 smooth transition for sway lock & focus zoom
   private aimSway = new THREE.Vector2(0, 0);
   private cameraBasePosition = new THREE.Vector3(0, 1.62, 0);
   private cameraLookTarget = new THREE.Vector3(0, 1.60, -50);
@@ -89,6 +109,7 @@ export class ArcheryScene {
   private onImpactCallback?: (result: ShotResult) => void;
   private onStaminaUpdate?: (staminaPercent: number, isFatigued: boolean) => void;
   private onWindUpdateCallback?: (wind: WindState) => void;
+  private onAimUpdateCallback?: (aimOffsetCm: { x: number; y: number }) => void;
 
   private clock = new THREE.Clock();
   private frameId: number = 0;
@@ -100,13 +121,15 @@ export class ArcheryScene {
     initialDistance: number,
     onImpact?: (result: ShotResult) => void,
     onStamina?: (staminaPercent: number, isFatigued: boolean) => void,
-    onWindUpdate?: (wind: WindState) => void
+    onWindUpdate?: (wind: WindState) => void,
+    onAimUpdate?: (aimOffsetCm: { x: number; y: number }) => void
   ) {
     this.container = container;
     this.targetDistance = initialDistance;
     this.onImpactCallback = onImpact;
     this.onStaminaUpdate = onStamina;
     this.onWindUpdateCallback = onWindUpdate;
+    this.onAimUpdateCallback = onAimUpdate;
 
     this.initRenderer();
     this.initScene();
@@ -725,22 +748,28 @@ export class ArcheryScene {
     const wx = Math.sin(this.windState.directionAngle) * this.windState.speed;
     const wz = Math.cos(this.windState.directionAngle) * this.windState.speed;
     const turbFactor = BallisticsEngine.computeTurbulenceFactor(new THREE.Vector3(wx, 0, wz));
+    const gustBoost = this.windState.isGusting ? (this.windState.gustIntensity ?? 0.5) : 0;
+
+    if (this.streakMat) {
+      this.streakMat.opacity = Math.min(0.65, 0.24 + turbFactor * 0.14 + gustBoost * 0.24);
+    }
 
     // 1. Update Drifting Dust Motes with Crosswind Turbulence Eddies
     if (this.windDustPoints) {
+      const flowMul = 1.35 + gustBoost * 0.45;
       for (let i = 0; i < this.windDustCount; i++) {
         const idx = i * 3;
         const speedMul = this.windDustSpeeds[i];
         const pz = this.windDustPositions[idx + 2];
 
         // Turbulent vortex swirl perpendicular & vertical to wind flow at high wind speeds
-        const eddyX = turbFactor * Math.sin(time * 7.5 + pz * 0.25 + i * 0.7) * 1.45;
-        const eddyY = turbFactor * Math.cos(time * 6.0 + pz * 0.18 + i * 1.1) * 0.65;
+        const eddyX = (turbFactor + gustBoost * 0.35) * Math.sin(time * 7.5 + pz * 0.25 + i * 0.7) * 1.45;
+        const eddyY = (turbFactor + gustBoost * 0.35) * Math.cos(time * 6.0 + pz * 0.18 + i * 1.1) * 0.65;
 
         // Drift along wind vector + thermal undulation + turbulent crosswind eddies
-        this.windDustPositions[idx] += (wx * speedMul * 1.35 + eddyX) * dt;
+        this.windDustPositions[idx] += (wx * speedMul * flowMul + eddyX) * dt;
         this.windDustPositions[idx + 1] += (Math.sin(time * 1.5 + i) * 0.12 + eddyY) * dt;
-        this.windDustPositions[idx + 2] += wz * speedMul * dt * 1.35;
+        this.windDustPositions[idx + 2] += wz * speedMul * dt * flowMul;
 
         // Wrap within [-22, +22] on X, [0.2, 6.8] on Y, and [-115, +2] on Z
         if (this.windDustPositions[idx] > 22) this.windDustPositions[idx] -= 44;
@@ -760,8 +789,8 @@ export class ArcheryScene {
       const dirX = Math.sin(this.windState.directionAngle);
       const dirZ = Math.cos(this.windState.directionAngle);
       // Tail length proportional to wind speed so stronger gusts produce longer wisps
-      const streakLength = Math.max(0.45, Math.min(3.5, this.windState.speed * 0.44));
-      const whipFreq = 3.0 + turbFactor * 6.5;
+      const streakLength = Math.max(0.45, Math.min(4.2, this.windState.speed * 0.44 + gustBoost * 0.65));
+      const whipFreq = 3.0 + (turbFactor + gustBoost * 0.4) * 6.5;
 
       for (let i = 0; i < this.windStreakCount; i++) {
         const aIdx = i * 3;
@@ -976,6 +1005,35 @@ export class ArcheryScene {
     this.arrowMesh.position.set(-0.018, 0.0, 0.14);
     this.bowGroup.add(this.arrowMesh);
 
+    // 4b. 3D Jade Thumb Ring (羊脂白玉扳指 / 鹿角決) hooked on bowstring at nock point
+    this.thumbRingMesh = new THREE.Group();
+    const jadeMat = new THREE.MeshPhysicalMaterial({
+      color: 0xe8efe6, // Warm mutton-fat white jade (羊脂白玉)
+      roughness: 0.16,
+      metalness: 0.05,
+      transmission: 0.25,
+      clearcoat: 0.9,
+    });
+    const ringBandGeo = new THREE.TorusGeometry(0.014, 0.0045, 12, 24);
+    const ringBand = new THREE.Mesh(ringBandGeo, jadeMat);
+    ringBand.rotation.x = Math.PI / 2;
+    this.thumbRingMesh.add(ringBand);
+
+    // Flared string-hook lip of the Manchu/Ming cylindrical thumb ring (扳指扣弦唇緣)
+    const lipGeo = new THREE.CylinderGeometry(0.017, 0.014, 0.014, 16, 1, true);
+    const lipMesh = new THREE.Mesh(lipGeo, jadeMat);
+    lipMesh.position.set(0, -0.004, 0);
+    this.thumbRingMesh.add(lipMesh);
+
+    // Gold inlay indicator ridge showing thumb twist orientation
+    const ridgeGeo = new THREE.BoxGeometry(0.003, 0.016, 0.004);
+    const ridgeMesh = new THREE.Mesh(ridgeGeo, goldTrimMat);
+    ridgeMesh.position.set(0.015, 0, 0);
+    this.thumbRingMesh.add(ridgeMesh);
+
+    this.thumbRingMesh.position.set(0.006, -0.012, 0.14);
+    this.bowGroup.add(this.thumbRingMesh);
+
     // Position bow in front of first-person camera
     this.bowGroup.position.set(0.18, -0.16, -0.42);
     this.bowGroup.rotation.y = 0.06;
@@ -1175,22 +1233,265 @@ export class ArcheryScene {
   }
 
   /**
-   * Standalone arrow mesh for aerodynamic flight
+   * Standalone arrow mesh for aerodynamic flight + temporary calligraphic brush-stroke ribbon trail
    */
   private buildFlightArrow() {
     this.flyingArrowMesh = this.createArrowModel();
     this.flyingArrowMesh.visible = false;
     this.scene.add(this.flyingArrowMesh);
+
+    // Pre-allocate crossed dual-ribbon BufferGeometry for the temporary brush-stroke trail
+    const maxNodes = this.arrowTrailMaxNodes;
+    const vertCount = maxNodes * 4; // 2 vertices for horizontal ribbon + 2 for vertical ribbon per node
+    this.arrowTrailPositions = new Float32Array(vertCount * 3);
+    this.arrowTrailUvs = new Float32Array(vertCount * 2);
+    this.arrowTrailAges = new Float32Array(vertCount);
+
+    const indices: number[] = [];
+    for (let i = 0; i < maxNodes - 1; i++) {
+      // Ribbon Plane A (Horizontal cross-section: vertices 4*i + 0, 4*i + 1)
+      const a0 = i * 4;
+      const a1 = i * 4 + 1;
+      const b0 = (i + 1) * 4;
+      const b1 = (i + 1) * 4 + 1;
+      indices.push(a0, a1, b0, a1, b1, b0);
+
+      // Ribbon Plane B (Vertical cross-section: vertices 4*i + 2, 4*i + 3)
+      const c0 = i * 4 + 2;
+      const c1 = i * 4 + 3;
+      const d0 = (i + 1) * 4 + 2;
+      const d1 = (i + 1) * 4 + 3;
+      indices.push(c0, c1, d0, c1, d1, d0);
+    }
+
+    this.arrowTrailGeo = new THREE.BufferGeometry();
+    const posAttr = new THREE.BufferAttribute(this.arrowTrailPositions, 3);
+    posAttr.setUsage(THREE.DynamicDrawUsage);
+    const uvAttr = new THREE.BufferAttribute(this.arrowTrailUvs, 2);
+    uvAttr.setUsage(THREE.DynamicDrawUsage);
+    const ageAttr = new THREE.BufferAttribute(this.arrowTrailAges, 1);
+    ageAttr.setUsage(THREE.DynamicDrawUsage);
+
+    this.arrowTrailGeo.setAttribute('position', posAttr);
+    this.arrowTrailGeo.setAttribute('uv', uvAttr);
+    this.arrowTrailGeo.setAttribute('aAge', ageAttr);
+    this.arrowTrailGeo.setIndex(indices);
+    this.arrowTrailGeo.setDrawRange(0, 0);
+
+    // Calligraphic Feibai (飛白 dry-brush ink & gold-silk) ShaderMaterial
+    this.arrowTrailMat = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+      },
+      vertexShader: `
+        attribute float aAge;
+        varying vec2 vUv;
+        varying float vAge;
+        void main() {
+          vUv = uv;
+          vAge = aAge;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform float uTime;
+        varying vec2 vUv;
+        varying float vAge;
+
+        void main() {
+          // vUv.x: 0.0 at trailing tail -> 1.0 at arrow fletching
+          // vUv.y: 0.0 -> 1.0 across brush width (0.5 = spine center)
+          float distFromSpine = abs(vUv.y - 0.5) * 2.0;
+
+          // Tapered wolf-hair calligraphy brush profile along stroke length
+          float strokeTaper = smoothstep(0.0, 0.22, vUv.x) * (1.0 - 0.25 * smoothstep(0.88, 1.0, vUv.x));
+          float edgeMask = 1.0 - smoothstep(0.15, 0.96 * strokeTaper + 0.04, distFromSpine);
+
+          // Procedural Feibai (飛白 dry-brush bristle striations)
+          float bristle1 = 0.5 + 0.5 * sin(vUv.y * 46.0 + sin(vUv.x * 16.0 - uTime * 3.0) * 1.4);
+          float bristle2 = 0.5 + 0.5 * cos(vUv.y * 82.0 - vUv.x * 24.0 + uTime * 2.0);
+          float feibaiDryness = mix(0.45, 1.0, bristle1 * 0.65 + bristle2 * 0.35);
+
+          // Split-bristle gaps intensify towards the trailing tail and outer brush edge
+          float dryGap = smoothstep(0.18 * (1.0 - vUv.x), 0.72, feibaiDryness * edgeMask);
+
+          // Age fade: 0.0 (freshly painted) -> 1.0 (evaporated into mountain air)
+          float lifeFade = pow(max(0.0, 1.0 - vAge), 1.35);
+
+          // Color: luminous warm parchment-gold core spine + smoky sumi-ink & cyan-jade brush wash
+          float coreGlow = exp(-distFromSpine * distFromSpine * 7.5);
+          vec3 inkWashCol = vec3(0.16, 0.21, 0.28);
+          vec3 windJadeTint = vec3(0.62, 0.84, 0.94);
+          vec3 goldSilkCore = vec3(1.0, 0.91, 0.68);
+
+          vec3 strokeCol = mix(inkWashCol, windJadeTint, 0.35 * (1.0 - distFromSpine));
+          strokeCol = mix(strokeCol, goldSilkCore, coreGlow * 0.85);
+
+          float alpha = dryGap * edgeMask * lifeFade * (0.34 + coreGlow * 0.38);
+          if (alpha < 0.01) discard;
+
+          gl_FragColor = vec4(strokeCol, alpha);
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+
+    this.arrowTrailMesh = new THREE.Mesh(this.arrowTrailGeo, this.arrowTrailMat);
+    this.arrowTrailMesh.frustumCulled = false;
+    this.arrowTrailMesh.visible = false;
+    this.scene.add(this.arrowTrailMesh);
   }
 
   /**
-   * Set dynamic wind parameters
+   * Samples the flying arrow's nock position & orientation to build a tapered, temporary
+   * brush-stroke ribbon trail that naturally evaporates over 1.25 seconds.
    */
-  public setWind(speed: number, angleRad: number, name: string) {
+  private updateArrowBrushTrail(time: number) {
+    if (!this.arrowTrailMesh) return;
+
+    // 1. Sample a new trail node if the arrow is currently in aerodynamic flight
+    if (this.currentArrowState && !this.currentArrowState.isStuck) {
+      const nockPos = this.currentArrowState.position.clone();
+      const lastNode =
+        this.arrowTrailHistory.length > 0
+          ? this.arrowTrailHistory[this.arrowTrailHistory.length - 1]
+          : null;
+
+      if (!lastNode || nockPos.distanceToSquared(lastNode.pos) >= 0.015) {
+        const forward = this.currentArrowState.velocity.clone().normalize();
+        const worldUp = new THREE.Vector3(0, 1, 0);
+        const right = new THREE.Vector3().crossVectors(forward, worldUp).normalize();
+        if (right.lengthSq() < 0.001) {
+          right.set(1, 0, 0);
+        }
+        const up = new THREE.Vector3().crossVectors(right, forward).normalize();
+
+        this.arrowTrailHistory.push({
+          pos: nockPos,
+          right,
+          up,
+          time,
+        });
+
+        if (this.arrowTrailHistory.length > this.arrowTrailMaxNodes) {
+          this.arrowTrailHistory.shift();
+        }
+      }
+    }
+
+    // 2. Prune expired nodes older than arrowTrailLifetime so the trail is temporary
+    while (
+      this.arrowTrailHistory.length > 0 &&
+      time - this.arrowTrailHistory[0].time > this.arrowTrailLifetime
+    ) {
+      this.arrowTrailHistory.shift();
+    }
+
+    const count = this.arrowTrailHistory.length;
+    if (count < 2) {
+      this.arrowTrailMesh.visible = false;
+      this.arrowTrailGeo.setDrawRange(0, 0);
+      return;
+    }
+
+    this.arrowTrailMesh.visible = true;
+    this.arrowTrailMat.uniforms.uTime.value = time;
+
+    // 3. Populate dynamic vertex buffers for the crossed dual-ribbon brush stroke
+    for (let i = 0; i < count; i++) {
+      const node = this.arrowTrailHistory[i];
+      const u = i / (count - 1); // 0.0 at tail -> 1.0 at arrow nock
+      const age = Math.min(1, Math.max(0, (time - node.time) / this.arrowTrailLifetime));
+
+      // Brush stroke width swells smoothly in mid-body and tapers at both ends (in meters)
+      const halfWidth = (0.012 + Math.sin(Math.pow(u, 0.7) * Math.PI) * 0.048) * (1.0 - age * 0.35);
+
+      // Subtle organic ink-wash wave along the ribbon spine
+      const waveOffset = Math.sin(u * 10.0 - time * 4.5) * 0.006 * (1.0 - u);
+      const cx = node.pos.x + node.right.x * waveOffset;
+      const cy = node.pos.y + node.up.y * waveOffset * 0.6;
+      const cz = node.pos.z + node.right.z * waveOffset;
+
+      const vBase = i * 4;
+
+      // Plane A: Horizontal brush ribbon (along node.right)
+      const rx = node.right.x * halfWidth;
+      const ry = node.right.y * halfWidth;
+      const rz = node.right.z * halfWidth;
+
+      this.arrowTrailPositions[(vBase + 0) * 3 + 0] = cx - rx;
+      this.arrowTrailPositions[(vBase + 0) * 3 + 1] = cy - ry;
+      this.arrowTrailPositions[(vBase + 0) * 3 + 2] = cz - rz;
+
+      this.arrowTrailPositions[(vBase + 1) * 3 + 0] = cx + rx;
+      this.arrowTrailPositions[(vBase + 1) * 3 + 1] = cy + ry;
+      this.arrowTrailPositions[(vBase + 1) * 3 + 2] = cz + rz;
+
+      // Plane B: Vertical brush ribbon (along node.up)
+      const ux = node.up.x * halfWidth;
+      const uy = node.up.y * halfWidth;
+      const uz = node.up.z * halfWidth;
+
+      this.arrowTrailPositions[(vBase + 2) * 3 + 0] = cx - ux;
+      this.arrowTrailPositions[(vBase + 2) * 3 + 1] = cy - uy;
+      this.arrowTrailPositions[(vBase + 2) * 3 + 2] = cz - uz;
+
+      this.arrowTrailPositions[(vBase + 3) * 3 + 0] = cx + ux;
+      this.arrowTrailPositions[(vBase + 3) * 3 + 1] = cy + uy;
+      this.arrowTrailPositions[(vBase + 3) * 3 + 2] = cz + uz;
+
+      // UVs & Normalized Age for all 4 vertices of node i
+      this.arrowTrailUvs[(vBase + 0) * 2 + 0] = u;
+      this.arrowTrailUvs[(vBase + 0) * 2 + 1] = 0.0;
+      this.arrowTrailUvs[(vBase + 1) * 2 + 0] = u;
+      this.arrowTrailUvs[(vBase + 1) * 2 + 1] = 1.0;
+      this.arrowTrailUvs[(vBase + 2) * 2 + 0] = u;
+      this.arrowTrailUvs[(vBase + 2) * 2 + 1] = 0.0;
+      this.arrowTrailUvs[(vBase + 3) * 2 + 0] = u;
+      this.arrowTrailUvs[(vBase + 3) * 2 + 1] = 1.0;
+
+      this.arrowTrailAges[vBase + 0] = age;
+      this.arrowTrailAges[vBase + 1] = age;
+      this.arrowTrailAges[vBase + 2] = age;
+      this.arrowTrailAges[vBase + 3] = age;
+    }
+
+    this.arrowTrailGeo.attributes.position.needsUpdate = true;
+    this.arrowTrailGeo.attributes.uv.needsUpdate = true;
+    this.arrowTrailGeo.attributes.aAge.needsUpdate = true;
+    this.arrowTrailGeo.setDrawRange(0, (count - 1) * 12);
+  }
+
+  /**
+   * Set dynamic wind parameters (including optional stochastic Wind Gust metadata)
+   */
+  public setWind(
+    speed: number,
+    angleRad: number,
+    name: string,
+    gustMeta?: {
+      isGusting?: boolean;
+      gustIntensity?: number;
+      gustDeltaSpeed?: number;
+      gustDeltaAngle?: number;
+      gustLabel?: string;
+      gustPhase?: 'calm' | 'building' | 'peak' | 'subsiding';
+      nextGustCountdownSec?: number;
+    }
+  ) {
     this.windState = {
       speed,
       directionAngle: angleRad,
       directionName: name,
+      isGusting: gustMeta?.isGusting ?? false,
+      gustIntensity: gustMeta?.gustIntensity ?? 0,
+      gustDeltaSpeed: gustMeta?.gustDeltaSpeed ?? 0,
+      gustDeltaAngle: gustMeta?.gustDeltaAngle ?? 0,
+      gustLabel: gustMeta?.gustLabel,
+      gustPhase: gustMeta?.gustPhase ?? 'calm',
+      nextGustCountdownSec: gustMeta?.nextGustCountdownSec ?? 0,
     };
     if (this.onWindUpdateCallback) {
       this.onWindUpdateCallback(this.windState);
@@ -1198,11 +1499,21 @@ export class ArcheryScene {
   }
 
   /**
-   * Updates Draw State (holding to draw tension)
+   * Toggles Deep Breath Focus (屏息凝神 · 沉氣鎖定) while holding Spacebar
    */
-  public updateDrawTension(tension: number, breathElapsed: number) {
+  public setDeepBreath(active: boolean) {
+    this.isDeepBreath = active;
+  }
+
+  /**
+   * Updates Draw State (holding to draw tension & effective breath stamina)
+   */
+  public updateDrawTension(tension: number, breathElapsed: number, isDeepBreath?: boolean) {
     this.drawTension = Math.max(0, Math.min(1, tension));
     this.breathTime = breathElapsed;
+    if (isDeepBreath !== undefined) {
+      this.isDeepBreath = isDeepBreath;
+    }
 
     // Flex limbs backward
     const flexAngle = this.drawTension * 0.22;
@@ -1215,8 +1526,12 @@ export class ArcheryScene {
     this.stringPositions[5] = pullBackZ;
     this.bowStringLine.geometry.attributes.position.needsUpdate = true;
 
-    // Pull arrow back along with string
+    // Pull arrow and 3D jade thumb ring back along with string
     this.arrowMesh.position.z = pullBackZ;
+    if (this.thumbRingMesh) {
+      this.thumbRingMesh.position.z = pullBackZ + 0.008;
+      this.thumbRingMesh.visible = this.arrowMesh.visible;
+    }
 
     // Play tension audio creak
     if (this.drawTension > 0.05 && Math.random() < 0.2) {
@@ -1224,7 +1539,7 @@ export class ArcheryScene {
     }
 
     // Breath stamina calculation:
-    // Optimal breathing zone: 1.2s to 3.2s
+    // Optimal breathing zone: 1.2s to 3.5s
     // Holding > 3.8s causes muscle fatigue tremor
     let stamina = 1.0;
     let isFatigued = false;
@@ -1234,7 +1549,7 @@ export class ArcheryScene {
     }
 
     if (this.drawTension > 0.01) {
-      archeryAudio.updateBreathing(breathElapsed, stamina, isFatigued);
+      archeryAudio.updateBreathing(breathElapsed, stamina, isFatigued, this.isDeepBreath);
     } else {
       archeryAudio.stopBreathing(false);
     }
@@ -1245,50 +1560,117 @@ export class ArcheryScene {
   }
 
   /**
+   * Emits current manual aim offset on the target plane in centimeters
+   * (+x = aiming Right of center, -x = aiming Left of center; +y = aiming High, -y = aiming Low)
+   */
+  public emitAimOffset() {
+    if (!this.onAimUpdateCallback) return;
+    const effectiveDist = Math.max(10, this.targetDistance - 0.15);
+    const aimXCm = -Math.tan(this.aimSway.x) * effectiveDist * 100;
+    const aimYCm = Math.tan(this.aimSway.y) * effectiveDist * 100;
+    this.onAimUpdateCallback({ x: aimXCm, y: aimYCm });
+  }
+
+  /**
    * Adjusts aim point with mouse movement
    */
   public applyAimOffset(deltaX: number, deltaY: number) {
-    const sensitivity = 0.0016;
+    const sensitivity = 0.0014;
     this.aimSway.x -= deltaX * sensitivity;
     this.aimSway.y -= deltaY * sensitivity;
 
     // Pitch & Yaw constraints
     this.aimSway.x = Math.max(-0.55, Math.min(0.55, this.aimSway.x));
     this.aimSway.y = Math.max(-0.22, Math.min(0.32, this.aimSway.y));
+    this.emitAimOffset();
   }
 
   /**
-   * Releases the arrow into aerodynamic flight
+   * Updates the manual thumb-draw release angle (扳指控弦 · 轉決撇弓角) in degrees,
+   * rotating the 3D jade thumb ring and subtly canting/torquing the bow handle in first-person view.
    */
-  public releaseArrow(bow: BowConfig): ShotResult | null {
+  public setThumbGripAngle(angleDeg: number) {
+    this.thumbGripAngleDeg = Math.max(-25, Math.min(45, angleDeg));
+    const rad = THREE.MathUtils.degToRad(this.thumbGripAngleDeg);
+
+    if (this.thumbRingMesh) {
+      // Rotate jade thumb ring around string axis to visualize inward hook vs outward crisp twist
+      this.thumbRingMesh.rotation.z = -rad * 1.35;
+      this.thumbRingMesh.rotation.y = rad * 0.45;
+    }
+
+    if (this.bowGroup) {
+      // Subtle bow-hand khatra preload cant (前手撇弓微傾) synced with thumb-draw angle
+      const deltaFromNeutral = THREE.MathUtils.degToRad(this.thumbGripAngleDeg - 16);
+      this.bowGroup.rotation.z = -deltaFromNeutral * 0.18;
+      this.bowGroup.rotation.y = 0.06 - deltaFromNeutral * 0.08;
+    }
+  }
+
+  /**
+   * Releases the arrow into aerodynamic flight, incorporating thumb-ring release clearance physics
+   */
+  public releaseArrow(bow: BowConfig, thumbAngleDeg?: number): ShotResult | null {
     // Always guarantee minimum power so every user click/release launches the arrow
     const effectiveTension = Math.max(0.45, this.drawTension);
     this.drawTension = effectiveTension;
 
+    const activeThumbAngle =
+      thumbAngleDeg !== undefined ? thumbAngleDeg : this.thumbGripAngleDeg;
+    const gripEffect = BallisticsEngine.calculateThumbGripEffect(
+      activeThumbAngle,
+      bow,
+      this.targetDistance,
+      effectiveTension
+    );
+
     archeryAudio.setBowDrawWeight(bow.drawWeightLbs);
-    archeryAudio.playRelease(bow.drawWeightLbs, effectiveTension);
+    archeryAudio.playRelease(bow.drawWeightLbs, effectiveTension, gripEffect.angleErrorDeg);
 
-    // Calculate launch world position & direction
-    const launchPos = new THREE.Vector3();
-    this.arrowMesh.getWorldPosition(launchPos);
+    // Crisp thumb-ring release grants a slight (+1.2%) clean string-exit efficiency bonus;
+    // severe shaft slap against the bow pass slightly reduces initial speed
+    const efficiencyMul = gripEffect.isCrispRelease
+      ? 1.012
+      : Math.max(0.95, 1.0 - Math.abs(gripEffect.angleErrorDeg) * 0.0018);
 
-    const launchDir = new THREE.Vector3(0, 0, -1);
-    launchDir.applyQuaternion(this.camera.quaternion);
+    const launchSpeed = bow.initialVelocity * (0.6 + this.drawTension * 0.4) * efficiencyMul;
+    this.activeArrowMassKg = (bow.arrowMassGrams || 35) / 1000;
+
+    // Sightline-calibrated launch origin at (0, 1.60, 0) so reticle aim offset maps 1:1 to target plane
+    const launchPos = new THREE.Vector3(0, 1.6, 0);
+
+    // Combine player's manual aim (plus breathing sway) with the bow's base sight zeroing elevation
+    // AND the angular deflection from the thumb-draw release angle (滯弦擦弝 / 轉決撇弓)
+    const effectiveDist = Math.max(10, this.targetDistance - 0.15);
+    const clearanceYawRad = -Math.atan2(gripEffect.clearanceDriftXCm / 100, effectiveDist);
+    const clearancePitchRad = Math.atan2(gripEffect.clearanceDriftYCm / 100, effectiveDist);
+
+    const baseElevRad = BallisticsEngine.computeBaseSightElevationRad(
+      this.targetDistance,
+      bow.initialVelocity,
+      this.activeArrowMassKg
+    );
+    const launchEuler = new THREE.Euler(
+      this.camera.rotation.x + baseElevRad + clearancePitchRad,
+      this.camera.rotation.y + clearanceYawRad,
+      0,
+      'YXZ'
+    );
+    const launchDir = new THREE.Vector3(0, 0, -1).applyEuler(launchEuler).normalize();
 
     // Add progressive release deviation when stamina is low (< 35%) or fatigued (> 3.8s)
+    // Holding Deep Breath (屏息凝神) suppresses release tremor by up to 78% unless completely exhausted
     const staminaRemaining = Math.max(0, 1 - this.breathTime / 5.5);
     if (staminaRemaining < 0.35 || this.breathTime > 3.8) {
       const lowStaminaFactor = Math.max(0, (0.35 - staminaRemaining) / 0.35);
       const fatigueFactor = this.breathTime > 3.8 ? Math.min(1.5, (this.breathTime - 3.8) * 0.6) : 0;
-      const totalShake = (lowStaminaFactor * 0.012) + (fatigueFactor * 0.022);
+      const deepBreathSuppression =
+        this.isDeepBreath && staminaRemaining > 0.05 ? 1 - this.deepBreathBlend * 0.78 : 1.0;
+      const totalShake = (lowStaminaFactor * 0.012 + fatigueFactor * 0.022) * deepBreathSuppression;
       launchDir.x += (Math.random() - 0.5) * totalShake;
       launchDir.y += (Math.random() - 0.5) * totalShake;
       launchDir.normalize();
     }
-
-    // Launch speed and arrow mass based on draw tension and bow rating
-    const launchSpeed = bow.initialVelocity * (0.6 + this.drawTension * 0.4);
-    this.activeArrowMassKg = (bow.arrowMassGrams || 35) / 1000;
 
     this.currentArrowState = {
       position: launchPos.clone(),
@@ -1299,13 +1681,26 @@ export class ArcheryScene {
       initialSpeed: launchSpeed,
       isStuck: false,
       turbulencePhase: Math.random() * Math.PI * 2,
+      thumbAngleDeg: activeThumbAngle,
+      gripTechniqueLabel: gripEffect.techniqueLabel,
     };
 
-    // Hide nocked arrow, show flying arrow
+    // Hide nocked arrow, show flying arrow & reset fresh brush-stroke trail
     this.arrowMesh.visible = false;
     this.flyingArrowMesh.visible = true;
     this.flyingArrowMesh.position.copy(launchPos);
     this.flyingArrowMesh.quaternion.copy(this.currentArrowState.orientation);
+
+    this.arrowTrailHistory = [];
+    const launchTime = this.clock.getElapsedTime();
+    const rightVec = new THREE.Vector3().crossVectors(launchDir, new THREE.Vector3(0, 1, 0)).normalize();
+    const upVec = new THREE.Vector3().crossVectors(rightVec, launchDir).normalize();
+    this.arrowTrailHistory.push({
+      pos: launchPos.clone(),
+      right: rightVec,
+      up: upVec,
+      time: launchTime,
+    });
 
     // Initialize chase camera right behind the launched arrow
     const velocityDir = launchDir.clone().normalize();
@@ -1315,8 +1710,9 @@ export class ArcheryScene {
       .add(new THREE.Vector3(0.18, 0.25, 0));
     this.chaseCamera.lookAt(launchPos.clone().addScaledVector(velocityDir, 8));
 
-    // Reset bowstring & limbs
-    this.updateDrawTension(0, 0);
+    // Reset bowstring, limbs & Deep Breath state
+    this.isDeepBreath = false;
+    this.updateDrawTension(0, 0, false);
 
     // Start arrow whistling audio (with dual-tone war whistle on heavy bows)
     archeryAudio.startArrowWhistle(launchSpeed, bow.drawWeightLbs);
@@ -1331,6 +1727,11 @@ export class ArcheryScene {
     this.currentArrowState = null;
     this.flyingArrowMesh.visible = false;
     this.arrowMesh.visible = true;
+    this.arrowTrailHistory = [];
+    if (this.arrowTrailMesh) {
+      this.arrowTrailMesh.visible = false;
+      this.arrowTrailGeo.setDrawRange(0, 0);
+    }
     this.updateDrawTension(0, 0);
     this.camera.position.copy(this.cameraBasePosition);
     this.camera.rotation.order = 'YXZ';
@@ -1618,16 +2019,39 @@ export class ArcheryScene {
       }
       this.updateWindParticles(dt, time);
 
-      // 2. Breath, Low-Stamina Tremor, and Aiming Sway (Always keep first-person camera cleanly aligned at shooting platform)
+      // 2. Breath, Deep-Breath Stabilization, Low-Stamina Tremor, and Aiming Sway
       this.camera.position.copy(this.cameraBasePosition);
       this.camera.rotation.order = 'YXZ';
+
+      // Smoothly interpolate Deep Breath stabilization & focus zoom blend
+      const staminaRemaining = Math.max(0, 1 - this.breathTime / 5.5);
+      const canSustainDeepBreath =
+        this.drawTension > 0 && this.isDeepBreath && staminaRemaining > 0.04;
+      const targetDeepBlend = canSustainDeepBreath ? 1.0 : 0.0;
+      const blendDiff = targetDeepBlend - this.deepBreathBlend;
+      if (Math.abs(blendDiff) > 0.001) {
+        this.deepBreathBlend += blendDiff * Math.min(1, dt * 10.0);
+        // Subtle optical focus zoom (50° -> 44.6° FOV) when holding Deep Breath
+        const targetFov = 50 - this.deepBreathBlend * 5.4;
+        if (Math.abs(this.camera.fov - targetFov) > 0.02) {
+          this.camera.fov = targetFov;
+          this.camera.updateProjectionMatrix();
+        }
+      } else if (this.deepBreathBlend === 0 && Math.abs(this.camera.fov - 50) > 0.02) {
+        this.camera.fov = 50;
+        this.camera.updateProjectionMatrix();
+      }
+
       if (this.drawTension > 0) {
-        const staminaRemaining = Math.max(0, 1 - this.breathTime / 5.5);
         const isOptimal = this.breathTime >= 1.2 && this.breathTime <= 3.5;
 
-        // Base Lissajous breathing sway (minimal during optimal breath window)
-        let swayMagnitude = isOptimal ? 0.0016 : 0.0032;
-        let breathSpeed = isOptimal ? 1.6 : 2.2;
+        // Deep Breath (屏息凝神) damps aiming sway by up to 86% and muscle tremor by up to 78%
+        const swayDamping = 1.0 - this.deepBreathBlend * 0.86;
+        const tremorDamping = 1.0 - this.deepBreathBlend * 0.78;
+
+        // Base Lissajous breathing sway (minimal during optimal breath window, nearly locked during Deep Breath)
+        const swayMagnitude = (isOptimal ? 0.0016 : 0.0032) * swayDamping;
+        const breathSpeed = (isOptimal ? 1.6 : 2.2) * (1.0 - this.deepBreathBlend * 0.45);
 
         // Progressive muscle tremor as stamina drops below 40% or enters fatigue (> 3.8s)
         let tremorX = 0;
@@ -1636,7 +2060,7 @@ export class ArcheryScene {
         if (staminaRemaining < 0.4 || this.breathTime > 3.5) {
           const lowStaminaRatio = Math.max(0, (0.4 - staminaRemaining) / 0.4); // 0 -> 1
           const fatigueBoost = this.breathTime > 3.8 ? Math.min(2.0, (this.breathTime - 3.8) * 0.75) : 0;
-          const intensity = lowStaminaRatio * 0.009 + fatigueBoost * 0.014;
+          const intensity = (lowStaminaRatio * 0.009 + fatigueBoost * 0.014) * tremorDamping;
 
           // High-frequency muscle tremor harmonics
           tremorX =
@@ -1724,6 +2148,9 @@ export class ArcheryScene {
         this.chaseCamera.lookAt(stuckPos);
       }
 
+      // 3.5 Update Temporary Calligraphic Brush-Stroke Ballistic Trail
+      this.updateArrowBrushTrail(time);
+
       // 4. Stuck Arrow Vibration (Damped Oscillation upon striking wood)
       if (this.currentArrowState?.isStuck && this.currentArrowState.wobbleIntensity! > 0.001) {
         this.currentArrowState.wobbleIntensity! *= 0.92; // Damping
@@ -1808,6 +2235,8 @@ export class ArcheryScene {
     window.removeEventListener('resize', this.onWindowResize);
     archeryAudio.stopBreathing(false);
     archeryAudio.stopArrowWhistle();
+    if (this.arrowTrailGeo) this.arrowTrailGeo.dispose();
+    if (this.arrowTrailMat) this.arrowTrailMat.dispose();
     this.renderer.dispose();
   }
 }
