@@ -22,6 +22,7 @@ import { ArcheryGuideModal } from './components/ArcheryGuideModal';
 import { Quiver3DHUD } from './components/Quiver3DHUD';
 import { BullseyeCalligraphyEffect } from './components/BullseyeCalligraphyEffect';
 import { archeryAudio } from './audio/ArcheryAudio';
+import { createStaticHistoricalNote } from './data/staticHistoricalNotes';
 
 export default function App() {
   // Game Setup State
@@ -57,7 +58,7 @@ export default function App() {
   const [openGuideWithDrawer, setOpenGuideWithDrawer] = useState<boolean>(false);
   const [showSummaryModal, setShowSummaryModal] = useState<boolean>(false);
 
-  // Gemini API Historical Notes State (unlocked when hitting target)
+  // Gemini API / Static Fallback Historical Notes State (unlocked when hitting target)
   const [historicalNotes, setHistoricalNotes] = useState<HistoricalNote[]>([]);
   const [isFetchingNote, setIsFetchingNote] = useState<boolean>(false);
   const [noteError, setNoteError] = useState<string | null>(null);
@@ -76,40 +77,49 @@ export default function App() {
       : Math.min(TIME_OF_DAY_PHASES.length - 1, currentArrowIndex);
   const currentTimePhase = TIME_OF_DAY_PHASES[activeTimePhaseIndex];
 
-  // Fetch context-aware Ming-Qing frontier pass facts from server-side Gemini API
+  // Fetch context-aware Olympic Team China & Chinese Archery History notes from server-side Gemini API,
+  // with automatic local fallback when hosted on pure static hosting such as GitHub Pages.
   const fetchHistoricalNoteForHit = useCallback(
     async (hitResult?: ShotResult) => {
       setIsFetchingNote(true);
       setNoteError(null);
 
+      const payload = {
+        frontierPass: currentRank.frontierPass,
+        frontierRegion: currentRank.frontierRegion,
+        rankTitle: currentRank.title,
+        bowName: currentBow.name,
+        bowDynasty: currentBow.dynasty,
+        targetDistance: currentRank.targetDistance,
+        ringName: hitResult ? hitResult.ringName : '9環！黃金內圈',
+        score: hitResult ? hitResult.score : 9,
+        windName: windState.directionName,
+        timeOfDay: `${currentTimePhase.shichen} · ${currentTimePhase.name}`,
+        arrowIndex: hitResult ? hitResult.arrowIndex : currentArrowIndex + 1,
+      };
+
       try {
         const response = await fetch('/api/historical-notes', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            frontierPass: currentRank.frontierPass,
-            frontierRegion: currentRank.frontierRegion,
-            rankTitle: currentRank.title,
-            bowName: currentBow.name,
-            bowDynasty: currentBow.dynasty,
-            targetDistance: currentRank.targetDistance,
-            ringName: hitResult ? hitResult.ringName : '穿正',
-            score: hitResult ? hitResult.score : 8,
-            windName: windState.directionName,
-            timeOfDay: `${currentTimePhase.shichen} · ${currentTimePhase.name}`,
-            arrowIndex: hitResult ? hitResult.arrowIndex : currentArrowIndex + 1,
-          }),
+          body: JSON.stringify(payload),
         });
 
+        const contentType = response.headers.get('content-type') || '';
+        if (!response.ok || !contentType.includes('application/json')) {
+          throw new Error('Static host fallback');
+        }
+
         const data = await response.json();
-        if (!response.ok || !data.success || !data.note) {
-          throw new Error(data.error || '無法取得邊關史略考據');
+        if (!data.success || !data.note) {
+          throw new Error('Static host fallback');
         }
 
         setHistoricalNotes((prev) => [data.note as HistoricalNote, ...prev]);
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : '調閱史略時發生網路異常';
-        setNoteError(msg);
+      } catch {
+        // Seamless static fallback for GitHub Pages (where /api/* Express routes do not run)
+        const fallbackNote = createStaticHistoricalNote(payload);
+        setHistoricalNotes((prev) => [fallbackNote, ...prev]);
       } finally {
         setIsFetchingNote(false);
       }
