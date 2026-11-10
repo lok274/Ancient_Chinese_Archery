@@ -28,16 +28,19 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
 
-      - name: Install dependencies
-        run: npm install
+      - name: Remove platform lockfile and install dependencies
+        run: |
+          rm -f bun.lock package-lock.json
+          npm install --no-package-lock --legacy-peer-deps
 
       - name: Build static site with Vite
         run: npm run build
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
