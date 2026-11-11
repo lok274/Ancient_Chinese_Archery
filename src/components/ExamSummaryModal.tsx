@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import confetti from 'canvas-confetti';
 import { MartialRank, ShotResult, MARTIAL_RANKS } from '../types/archery';
-import { Trophy, RotateCcw, ArrowRight, Medal, AlertCircle, BookOpen } from 'lucide-react';
+import { Trophy, RotateCcw, ArrowRight, Medal, AlertCircle, BookOpen, Users } from 'lucide-react';
 import { archeryAudio } from '../audio/ArcheryAudio';
 
 interface ExamSummaryModalProps {
@@ -9,6 +9,7 @@ interface ExamSummaryModalProps {
   shotResults: ShotResult[];
   onRetry: () => void;
   onNextRank: (nextRank: MartialRank) => void;
+  onOpenRelayModal?: () => void;
 }
 
 const STAGE_CHINA_MILESTONE: Record<string, { title: string; detail: string }> = {
@@ -39,6 +40,7 @@ export const ExamSummaryModal: React.FC<ExamSummaryModalProps> = ({
   shotResults,
   onRetry,
   onNextRank,
+  onOpenRelayModal,
 }) => {
   const totalScore = shotResults.reduce((sum, r) => sum + r.score, 0);
   const isPassed = totalScore >= currentRank.qualifyScore;
@@ -151,27 +153,38 @@ export const ExamSummaryModal: React.FC<ExamSummaryModalProps> = ({
           <p className="text-slate-200 leading-relaxed">{milestone.detail}</p>
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex items-center gap-3 w-full mt-4">
+        {/* Action Buttons + Section 8.5 Peer Relay Button (邀請搭檔接力) */}
+        <div className="flex flex-wrap items-center gap-2.5 w-full mt-4">
           <button
             onClick={onRetry}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 px-4 text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors cursor-pointer"
+            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 px-3 text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors cursor-pointer"
           >
             <RotateCcw className="w-4 h-4" />
             <span>重賽本輪</span>
           </button>
 
+          {onOpenRelayModal && (
+            <button
+              type="button"
+              onClick={onOpenRelayModal}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 px-3 text-xs font-bold text-sky-950 bg-sky-400 hover:bg-sky-300 rounded-lg shadow-md transition-colors cursor-pointer whitespace-nowrap"
+            >
+              <Users className="w-4 h-4" />
+              <span>邀請搭檔接力 〔OBJ-PEER〕</span>
+            </button>
+          )}
+
           {isPassed && nextRank ? (
             <button
               onClick={() => onNextRank(nextRank)}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 px-4 text-xs font-bold text-amber-950 bg-amber-400 hover:bg-amber-300 rounded-lg shadow-md transition-colors cursor-pointer"
+              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 px-3 text-xs font-bold text-amber-950 bg-amber-400 hover:bg-amber-300 rounded-lg shadow-md transition-colors cursor-pointer"
             >
               <span>晉級 · {nextRank.title}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           ) : (
             isPassed && (
-              <div className="flex-1 flex items-center justify-center py-2.5 px-4 text-xs font-bold text-amber-300 bg-amber-950/60 border border-amber-500 rounded-lg">
+              <div className="flex-1 flex items-center justify-center py-2.5 px-3 text-xs font-bold text-amber-300 bg-amber-950/60 border border-amber-500 rounded-lg">
                 <Trophy className="w-4 h-4 mr-1.5 text-amber-400" />
                 <span>榮獲奧林匹克射箭總冠軍</span>
               </div>

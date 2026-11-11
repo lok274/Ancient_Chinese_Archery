@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   MARTIAL_RANKS,
   BOW_PRESETS,
@@ -18,11 +18,23 @@ import { AimReticleHUD } from './components/AimReticleHUD';
 import { BottomControlDock } from './components/BottomControlDock';
 import { ShotScoreBanner } from './components/ShotScoreBanner';
 import { ExamSummaryModal } from './components/ExamSummaryModal';
-import { ArcheryGuideModal } from './components/ArcheryGuideModal';
+import { ArcheryGuideModal, GuideTab } from './components/ArcheryGuideModal';
 import { Quiver3DHUD } from './components/Quiver3DHUD';
 import { BullseyeCalligraphyEffect } from './components/BullseyeCalligraphyEffect';
+import { MaterialEvolutionLab } from './components/MaterialEvolutionLab';
+import { MechanicsOverlay } from './components/MechanicsOverlay';
+import { RelayHandoffModal } from './components/RelayHandoffModal';
+import { HKHeritagePanel } from './components/HKHeritagePanel';
+import { MATERIAL_TIMELINE_STAGES } from './data/inquiry/materialTimeline';
+import { useInquiryProgress } from './state/useInquiryProgress';
+import { useRelaySession } from './state/useRelaySession';
 import { archeryAudio } from './audio/ArcheryAudio';
 import { createStaticHistoricalNote } from './data/staticHistoricalNotes';
+
+type QueuedModalRequest =
+  | { type: 'guide'; tab?: GuideTab; missionId?: string; openDrawer?: boolean }
+  | { type: 'hk_heritage' }
+  | { type: 'relay' };
 
 export default function App() {
   // Game Setup State
@@ -55,8 +67,100 @@ export default function App() {
   // Audio & Modals
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [showGuide, setShowGuide] = useState<boolean>(false);
+  const [guideInitialTab, setGuideInitialTab] = useState<GuideTab>('china_olympic');
+  const [guideInitialMissionId, setGuideInitialMissionId] = useState<string | undefined>(undefined);
   const [openGuideWithDrawer, setOpenGuideWithDrawer] = useState<boolean>(false);
   const [showSummaryModal, setShowSummaryModal] = useState<boolean>(false);
+  const [showHKHeritage, setShowHKHeritage] = useState<boolean>(false);
+  const [showRelayModal, setShowRelayModal] = useState<boolean>(false);
+
+  // v2 Material Evolution Lab Drawer State
+  const [isMaterialLabOpen, setIsMaterialLabOpen] = useState<boolean>(false);
+  const [materialGhostEnabled, setMaterialGhostEnabled] = useState<boolean>(false);
+
+  // v2 Inquiry Progress & Peer Relay Hooks
+  const {
+    state: inquiryState,
+    storageWarning,
+    saveReflection,
+    toggleSourceKeyword,
+    toggleMechanicsOverlay,
+    incrementOverlayShotCount,
+    dismissTechPrompt,
+    setSelectedMaterialStageId,
+    updateAICommentary,
+  } = useInquiryProgress();
+
+  const {
+    partnerPayload,
+    relayError,
+    adjustmentReason,
+    teamReflection,
+    generatedCode,
+    generateRelayCode,
+    importRelayCode,
+    setAdjustmentReason,
+    setTeamReflection,
+    clearPartnerSession,
+  } = useRelaySession();
+
+  // Section 5 Interaction Locking:
+  // Inquiry missions, heritage panels, and relay handoff must be unopenable while drawProgress > 0 or stamina < 30.
+  const isInteractionLocked =
+    drawTension > 0.01 ||
+    staminaPercent * 100 < 30 ||
+    gameState === 'drawing' ||
+    gameState === 'aiming';
+
+  const [queuedModal, setQueuedModal] = useState<QueuedModalRequest | null>(null);
+  const [lockHintVisible, setLockHintVisible] = useState<boolean>(false);
+
+  const requestOpenModal = useCallback(
+    (req: QueuedModalRequest) => {
+      if (isInteractionLocked) {
+        setQueuedModal(req);
+        setLockHintVisible(true);
+        return;
+      }
+      if (req.type === 'guide') {
+        setGuideInitialTab(req.tab || 'china_olympic');
+        setGuideInitialMissionId(req.missionId);
+        setOpenGuideWithDrawer(Boolean(req.openDrawer));
+        setShowGuide(true);
+      } else if (req.type === 'hk_heritage') {
+        setShowHKHeritage(true);
+      } else if (req.type === 'relay') {
+        setShowRelayModal(true);
+      }
+    },
+    [isInteractionLocked]
+  );
+
+  // Automatically flush queued modal once draw/release completes and stamina recovers
+  useEffect(() => {
+    if (!isInteractionLocked && queuedModal) {
+      const req = queuedModal;
+      setQueuedModal(null);
+      setLockHintVisible(false);
+      if (req.type === 'guide') {
+        setGuideInitialTab(req.tab || 'china_olympic');
+        setGuideInitialMissionId(req.missionId);
+        setOpenGuideWithDrawer(Boolean(req.openDrawer));
+        setShowGuide(true);
+      } else if (req.type === 'hk_heritage') {
+        setShowHKHeritage(true);
+      } else if (req.type === 'relay') {
+        setShowRelayModal(true);
+      }
+    }
+  }, [isInteractionLocked, queuedModal]);
+
+  // Open Relay Modal automatically if URL hash contains a partner relay code or error on initial load
+  useEffect(() => {
+    if ((partnerPayload || relayError) && !isInteractionLocked) {
+      setShowRelayModal(true);
+    }
+  }, [partnerPayload, relayError]);
 
   // Gemini API / Static Fallback Historical Notes State (unlocked when hitting target)
   const [historicalNotes, setHistoricalNotes] = useState<HistoricalNote[]>([]);
@@ -67,10 +171,6 @@ export default function App() {
   const [manualTimePhaseIndex, setManualTimePhaseIndex] = useState<number | null>(null);
   const [roundKey, setRoundKey] = useState<number>(1);
 
-  // Canvas trigger ref to ready next arrow
-  const sceneResetRef = useRef<(() => void) | null>(null);
-
-  // Determine active Time-of-Day phase (shifts from Sunrise on Arrow 1 to Golden Hour / Sunset on Arrows 5–6)
   const activeTimePhaseIndex =
     manualTimePhaseIndex !== null
       ? manualTimePhaseIndex
@@ -134,17 +234,18 @@ export default function App() {
     archeryAudio.setMuted(nextMute);
   }, [isMuted]);
 
-  // Handle Shot Impact: when the user hits the target (score > 0), fetch context-aware facts for the frontier pass
+  // Handle Shot Impact: when the user hits the target (score > 0), fetch context-aware facts & increment overlay shot counter
   const handleShotCompleted = useCallback(
     (result: ShotResult) => {
       setLastShotResult(result);
       setShotResults((prev) => [...prev, result]);
+      incrementOverlayShotCount();
 
       if (result.score > 0) {
         fetchHistoricalNoteForHit(result);
       }
     },
-    [fetchHistoricalNoteForHit]
+    [fetchHistoricalNoteForHit, incrementOverlayShotCount]
   );
 
   // Handle Next Arrow or Exam Conclusion
@@ -154,11 +255,9 @@ export default function App() {
     if (currentArrowIndex < MAX_ARROWS_PER_ROUND - 1) {
       setCurrentArrowIndex((prev) => prev + 1);
       setGameState('idle');
-      // Ready next arrow in canvas
       const event = new CustomEvent('ready_next_arrow');
       window.dispatchEvent(event);
     } else {
-      // Completed all 6 arrows of martial exam round
       setGameState('round_end');
       setShowSummaryModal(true);
     }
@@ -174,7 +273,6 @@ export default function App() {
     setManualTimePhaseIndex(null);
     setRoundKey((prev) => prev + 1);
 
-    // Trigger canvas reset
     const event = new CustomEvent('reset_round');
     window.dispatchEvent(event);
   }, []);
@@ -235,7 +333,6 @@ export default function App() {
     }
   }, [gameState, handleNextArrow]);
 
-  // Remaining arrows in the quiver (excluding arrows already fired and the one currently in flight)
   const remainingInQuiver = Math.max(
     0,
     MAX_ARROWS_PER_ROUND - shotResults.length - (gameState === 'flight' ? 1 : 0)
@@ -247,16 +344,21 @@ export default function App() {
         return (currentArrowIndex + 1) % TIME_OF_DAY_PHASES.length;
       }
       if (prev === TIME_OF_DAY_PHASES.length - 1) {
-        return null; // Return to automatic exam progression
+        return null;
       }
       return prev + 1;
     });
   }, [currentArrowIndex]);
 
-  const handleOpenGuideWithDrawer = useCallback(() => {
-    setOpenGuideWithDrawer(true);
-    setShowGuide(true);
-  }, []);
+  const activeMaterialGhostStage = materialGhostEnabled
+    ? MATERIAL_TIMELINE_STAGES.find((s) => s.id === inquiryState.selectedMaterialStageId) ||
+      MATERIAL_TIMELINE_STAGES[0]
+    : null;
+
+  const annotatedSourceCount = Object.values(inquiryState.sourceAnnotations).reduce(
+    (sum, arr) => sum + arr.length,
+    0
+  );
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-stone-950 font-serif select-none">
@@ -276,9 +378,19 @@ export default function App() {
         onWindChange={setWindState}
         onAimOffsetChange={setAimOffsetCm}
         onThumbAngleChange={setThumbAngleDeg}
+        mechanicsOverlayEnabled={inquiryState.mechanicsOverlayEnabled}
+        materialGhostStage={activeMaterialGhostStage}
+        onClickHKBoard={() => requestOpenModal({ type: 'hk_heritage' })}
       />
 
-      {/* 2. Top Bar Ritual Contract */}
+      {/* Interaction Lock Subtle Peripheral Hint (Section 5: 射箭中，完成本箭後開啟) */}
+      {lockHintVisible && (
+        <div className="fixed top-14 right-4 z-40 pointer-events-none px-3.5 py-2 rounded-lg bg-amber-950/90 border border-amber-400/70 text-amber-200 text-xs font-bold shadow-xl animate-pulse">
+          射箭中，完成本箭後開啟
+        </div>
+      )}
+
+      {/* 2. Top Bar Ritual Contract + v2 Mechanics Overlay & Inquiry Triggers */}
       <TopRitualBar
         currentRank={currentRank}
         currentArrowIndex={currentArrowIndex}
@@ -289,15 +401,24 @@ export default function App() {
         onCycleTimePhase={handleCycleTimePhase}
         isMuted={isMuted}
         onToggleMute={handleToggleMute}
-        onOpenGuide={() => {
-          setOpenGuideWithDrawer(historicalNotes.length > 0);
-          setShowGuide(true);
-        }}
+        mechanicsOverlayEnabled={inquiryState.mechanicsOverlayEnabled}
+        onToggleMechanicsOverlay={toggleMechanicsOverlay}
+        onOpenHKHeritage={() => requestOpenModal({ type: 'hk_heritage' })}
+        onOpenInquiryMissions={() =>
+          requestOpenModal({ type: 'guide', tab: 'inquiry_missions', openDrawer: false })
+        }
+        onOpenGuide={() =>
+          requestOpenModal({
+            type: 'guide',
+            tab: 'china_olympic',
+            openDrawer: historicalNotes.length > 0,
+          })
+        }
         roundKey={roundKey}
         isVisible={!showSummaryModal}
       />
 
-      {/* 3. Minimal Floating Aim Sight, Windage Calculation, Manual Grip Control & Breath Stamina HUD */}
+      {/* 3. Minimal Floating Aim Sight, Windage Calculation & Breath Stamina HUD */}
       <AimReticleHUD
         gameState={gameState}
         drawTension={drawTension}
@@ -313,7 +434,39 @@ export default function App() {
         onActionClick={handleHUDAction}
       />
 
-      {/* 4. Real-Time 3D Ming-Era Quiver HUD Component */}
+      {/* 3b. v2 Mechanics Overlay (2D Draw-Force Curve + 3D Limb Stress Legend + 3-Shot Inquiry Prompt) */}
+      <MechanicsOverlay
+        enabled={inquiryState.mechanicsOverlayEnabled}
+        drawTension={drawTension}
+        currentBow={currentBow}
+        overlayEnabledShotCount={inquiryState.overlayEnabledShotCount}
+        dismissedTechPrompt={inquiryState.dismissedTechPrompt}
+        onDismissTechPrompt={dismissTechPrompt}
+        onOpenTechMission={() =>
+          requestOpenModal({
+            type: 'guide',
+            tab: 'inquiry_missions',
+            missionId: 'M-TECH-01',
+            openDrawer: false,
+          })
+        }
+      />
+
+      {/* 3c. v2 Material Evolution Lab Upward Collapsible Drawer (Bottom-Left Peripheral) */}
+      <MaterialEvolutionLab
+        isOpen={isMaterialLabOpen}
+        onToggleOpen={() => setIsMaterialLabOpen((prev) => !prev)}
+        selectedStageId={inquiryState.selectedMaterialStageId}
+        onSelectStageId={setSelectedMaterialStageId}
+        ghostEnabled={materialGhostEnabled}
+        onToggleGhost={setMaterialGhostEnabled}
+        currentBow={currentBow}
+        currentRank={currentRank}
+        windState={windState}
+        disabled={gameState !== 'idle'}
+      />
+
+      {/* 4. Real-Time 3D Quiver HUD Component */}
       <Quiver3DHUD
         totalArrows={MAX_ARROWS_PER_ROUND}
         currentArrowIndex={currentArrowIndex}
@@ -321,7 +474,7 @@ export default function App() {
         gameState={gameState}
       />
 
-      {/* 5. Animated Ink-Wash Calligraphy Effect on Bullseye Hit */}
+      {/* 5. Animated Bullseye Celebration Banner */}
       <BullseyeCalligraphyEffect
         isActive={gameState === 'impact'}
         shotResult={lastShotResult}
@@ -330,7 +483,7 @@ export default function App() {
         arrowIndex={currentArrowIndex + 1}
       />
 
-      {/* 6. Shot Score Callout Banner upon impact */}
+      {/* 6. Top-Right Shot Score & National Sports-Tech Support Data Card Banner */}
       {gameState === 'impact' && (
         <ShotScoreBanner
           result={lastShotResult}
@@ -338,12 +491,14 @@ export default function App() {
           totalArrows={MAX_ARROWS_PER_ROUND}
           frontierPass={currentRank.frontierPass}
           isFetchingNote={isFetchingNote}
-          onOpenHistoricalNotes={handleOpenGuideWithDrawer}
+          onOpenHistoricalNotes={() =>
+            requestOpenModal({ type: 'guide', tab: 'china_olympic', openDrawer: true })
+          }
           onNextArrow={handleNextArrow}
         />
       )}
 
-      {/* 6. Collapsible Bottom Control Dock (Zero Viewport Occlusion) */}
+      {/* 7. Collapsible Bottom Control Dock */}
       <BottomControlDock
         currentBow={currentBow}
         onSelectBow={handleSelectBow}
@@ -355,17 +510,21 @@ export default function App() {
         disabled={gameState !== 'idle'}
       />
 
-      {/* 7. End-of-Round Martial Exam Modal */}
+      {/* 8. End-of-Round Olympic Scorecard & Relay Handoff Trigger Modal */}
       {showSummaryModal && (
         <ExamSummaryModal
           currentRank={currentRank}
           shotResults={shotResults}
           onRetry={handleResetRound}
           onNextRank={handleNextRank}
+          onOpenRelayModal={() => {
+            setShowSummaryModal(false);
+            setShowRelayModal(true);
+          }}
         />
       )}
 
-      {/* 8. Cultural & Historical Knowledge Guide Modal with Gemini 'Historical Notes' Drawer */}
+      {/* 9. 5-Tab Cultural, Historical & Civic Inquiry Guide Modal */}
       {showGuide && (
         <ArcheryGuideModal
           onClose={() => {
@@ -378,9 +537,55 @@ export default function App() {
           isFetchingNote={isFetchingNote}
           noteError={noteError}
           initialOpenDrawer={openGuideWithDrawer}
+          initialTab={guideInitialTab}
+          initialMissionId={guideInitialMissionId}
           onRequestNewNote={() => fetchHistoricalNoteForHit(lastShotResult || undefined)}
+          reflections={inquiryState.reflections}
+          completedMissionIds={inquiryState.completedMissionIds}
+          sourceAnnotations={inquiryState.sourceAnnotations}
+          aiCommentary={inquiryState.aiCommentary}
+          storageWarning={storageWarning}
+          onSaveReflection={saveReflection}
+          onToggleSourceKeyword={toggleSourceKeyword}
+          onUpdateAICommentary={updateAICommentary}
         />
       )}
+
+      {/* 10. v2 Hong Kong Archery Heritage Panel (Opened from 3D side-range exhibition board) */}
+      <HKHeritagePanel
+        isOpen={showHKHeritage}
+        onClose={() => setShowHKHeritage(false)}
+        sourceAnnotations={inquiryState.sourceAnnotations}
+        onToggleSourceKeyword={toggleSourceKeyword}
+        onOpenHKMission={() => {
+          setShowHKHeritage(false);
+          setGuideInitialTab('inquiry_missions');
+          setGuideInitialMissionId('M-HK-01');
+          setOpenGuideWithDrawer(false);
+          setShowGuide(true);
+        }}
+      />
+
+      {/* 11. v2 Peer Relay Collaboration Modal (#relay=<base64url>) */}
+      <RelayHandoffModal
+        isOpen={showRelayModal}
+        onClose={() => setShowRelayModal(false)}
+        currentRank={currentRank}
+        currentBow={currentBow}
+        shotResults={shotResults}
+        missionsTouched={inquiryState.completedMissionIds}
+        annotatedSourceCount={annotatedSourceCount}
+        partnerPayload={partnerPayload}
+        relayError={relayError}
+        adjustmentReason={adjustmentReason}
+        teamReflection={teamReflection}
+        generatedCode={generatedCode}
+        onGenerateCode={generateRelayCode}
+        onImportCode={importRelayCode}
+        onChangeAdjustmentReason={setAdjustmentReason}
+        onChangeTeamReflection={setTeamReflection}
+        onClearPartner={clearPartnerSession}
+      />
     </div>
   );
 }

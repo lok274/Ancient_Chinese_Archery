@@ -1,7 +1,18 @@
 import React from 'react';
 import { motion, AnimatePresence, Variants } from 'motion/react';
 import { MartialRank, TimeOfDayPhase } from '../types/archery';
-import { Trophy, BookOpen, Volume2, VolumeX, Sun, Sunset, Flame } from 'lucide-react';
+import {
+  Trophy,
+  BookOpen,
+  Volume2,
+  VolumeX,
+  Sun,
+  Sunset,
+  Flame,
+  Activity,
+  Landmark,
+  Compass,
+} from 'lucide-react';
 
 interface TopRitualBarProps {
   currentRank: MartialRank;
@@ -14,6 +25,10 @@ interface TopRitualBarProps {
   isMuted: boolean;
   onToggleMute: () => void;
   onOpenGuide: () => void;
+  mechanicsOverlayEnabled?: boolean;
+  onToggleMechanicsOverlay?: () => void;
+  onOpenInquiryMissions?: () => void;
+  onOpenHKHeritage?: () => void;
   roundKey?: number;
   isVisible?: boolean;
 }
@@ -67,11 +82,14 @@ export const TopRitualBar: React.FC<TopRitualBarProps> = ({
   totalArrows,
   shotScores,
   currentTimePhase,
-  isManualTimeOverride,
   onCycleTimePhase,
   isMuted,
   onToggleMute,
   onOpenGuide,
+  mechanicsOverlayEnabled = false,
+  onToggleMechanicsOverlay,
+  onOpenInquiryMissions,
+  onOpenHKHeritage,
   roundKey = 0,
   isVisible = true,
 }) => {
@@ -90,27 +108,27 @@ export const TopRitualBar: React.FC<TopRitualBarProps> = ({
           initial="hidden"
           animate="visible"
           exit="exit"
-          className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between gap-4 px-5 py-2.5 bg-slate-950/75 backdrop-blur-md text-amber-50 border-b border-amber-500/35"
+          className="absolute top-0 left-0 right-0 z-20 h-11 flex items-center justify-between gap-3 px-4 bg-slate-950/80 backdrop-blur-md text-amber-50 border-b border-amber-500/35"
         >
           {/* Zone 1: Brand Title with Team China Red-Gold & Olympic 5-Color Bar */}
           <motion.div
             variants={ritualItemVariants}
-            className="flex items-center gap-2.5 shrink-0"
+            className="flex items-center gap-2 shrink-0"
           >
             <div className="flex items-center gap-0.5" aria-hidden="true">
-              <span className="w-1.5 h-4 bg-sky-500 rounded-xs" />
-              <span className="w-1.5 h-4 bg-amber-400 rounded-xs" />
-              <span className="w-1.5 h-4 bg-slate-200 rounded-xs" />
-              <span className="w-1.5 h-4 bg-emerald-500 rounded-xs" />
-              <span className="w-1.5 h-4 bg-red-600 rounded-xs" />
+              <span className="w-1.5 h-3.5 bg-sky-500 rounded-xs" />
+              <span className="w-1.5 h-3.5 bg-amber-400 rounded-xs" />
+              <span className="w-1.5 h-3.5 bg-slate-200 rounded-xs" />
+              <span className="w-1.5 h-3.5 bg-emerald-500 rounded-xs" />
+              <span className="w-1.5 h-3.5 bg-red-600 rounded-xs" />
             </div>
-            <span className="text-base sm:text-lg font-bold tracking-wider text-amber-200 whitespace-nowrap">
+            <span className="text-sm sm:text-base font-bold tracking-wider text-amber-200 whitespace-nowrap">
               奧林匹克射箭錦標賽 · 中國射箭榮耀與歷史
             </span>
           </motion.div>
 
           {/* Zone 2: Clean Unboxed Olympic Match Telemetry */}
-          <div className="hidden lg:flex items-center gap-5 text-xs">
+          <div className="hidden xl:flex items-center gap-4 text-xs">
             {/* Active Olympic Stage & Venue */}
             <motion.div
               variants={ritualItemVariants}
@@ -122,20 +140,7 @@ export const TopRitualBar: React.FC<TopRitualBarProps> = ({
               </span>
               <span className="text-stone-500">·</span>
               <span className="text-stone-300 whitespace-nowrap">
-                {currentRank.frontierPass}
-              </span>
-            </motion.div>
-
-            <span className="text-stone-700">|</span>
-
-            {/* Olympic Target Distance */}
-            <motion.div
-              variants={ritualItemVariants}
-              className="flex items-center gap-1 text-stone-300 whitespace-nowrap"
-            >
-              <span className="text-stone-400">距離:</span>
-              <span className="font-mono tabular-nums font-bold text-amber-300">
-                {currentRank.targetDistance}m
+                {currentRank.frontierPass} ({currentRank.targetDistance}m)
               </span>
             </motion.div>
 
@@ -146,7 +151,7 @@ export const TopRitualBar: React.FC<TopRitualBarProps> = ({
               <button
                 type="button"
                 onClick={onCycleTimePhase}
-                className="flex items-center gap-1.5 px-2 py-1 rounded bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 transition-colors cursor-pointer whitespace-nowrap"
+                className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 transition-colors cursor-pointer whitespace-nowrap"
               >
                 {isGoldenOrSunset ? (
                   <Sunset className="w-3.5 h-3.5 text-orange-400" />
@@ -160,23 +165,13 @@ export const TopRitualBar: React.FC<TopRitualBarProps> = ({
                 </span>
                 {isGoldenOrSunset && <Flame className="w-3 h-3 text-orange-400" />}
               </button>
-
-              <div className="pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 absolute left-1/2 -translate-x-1/2 top-full mt-2 w-72 p-2.5 bg-slate-950/95 border border-amber-500/40 rounded shadow-xl z-40 text-xs space-y-1">
-                <div className="font-bold text-amber-300">
-                  賽程時段：{currentTimePhase.shichen} ({currentTimePhase.name})
-                </div>
-                <p className="text-stone-300 leading-relaxed">{currentTimePhase.visibilityNote}</p>
-                <div className="text-[10px] text-stone-400">
-                  {isManualTimeOverride ? '點擊切換時段 / 恢復隨箭序推進' : '點擊可手動切換賽場時段光影'}
-                </div>
-              </div>
             </motion.div>
 
             <span className="text-stone-700">|</span>
 
             {/* 6-Arrow End Progress */}
             <motion.div variants={ritualItemVariants} className="flex items-center gap-1.5">
-              <span className="text-stone-400 whitespace-nowrap">本局箭序:</span>
+              <span className="text-stone-400 whitespace-nowrap">箭序:</span>
               <div className="flex items-center gap-1">
                 {Array.from({ length: totalArrows }).map((_, i) => {
                   const shot = i < shotScores.length;
@@ -184,7 +179,7 @@ export const TopRitualBar: React.FC<TopRitualBarProps> = ({
                   return (
                     <span
                       key={i}
-                      className={`w-2 h-4 rounded-xs transition-colors ${
+                      className={`w-2 h-3.5 rounded-xs transition-colors ${
                         shot
                           ? 'bg-amber-400'
                           : isCurrent
@@ -199,22 +194,65 @@ export const TopRitualBar: React.FC<TopRitualBarProps> = ({
             </motion.div>
           </div>
 
-          {/* Zone 3: Scoreboard & Team China / History Guide Button */}
+          {/* Zone 3: Scoreboard, Mechanics Overlay Toggle (v2), HK Board & Guide Buttons */}
           <motion.div
             variants={ritualItemVariants}
-            className="flex items-center gap-2.5 shrink-0"
+            className="flex items-center gap-1.5 shrink-0"
           >
-            <div className="flex items-baseline gap-1 px-2.5 py-1 bg-red-950/70 border border-red-500/40 rounded">
-              <span className="text-[11px] text-amber-200 font-semibold">CHN 總環數:</span>
-              <span className="font-mono tabular-nums text-base font-bold text-amber-300">
+            <div className="flex items-baseline gap-1 px-2 py-0.5 bg-red-950/70 border border-red-500/40 rounded">
+              <span className="text-[11px] text-amber-200 font-semibold">CHN:</span>
+              <span className="font-mono tabular-nums text-sm font-bold text-amber-300">
                 {totalScore}
               </span>
-              <span className="text-[11px] text-stone-400">/ 60</span>
+              <span className="text-[10px] text-stone-400">/60</span>
             </div>
+
+            {/* v2 Mechanics Overlay Toggle Icon (力學疊加層) */}
+            {onToggleMechanicsOverlay && (
+              <button
+                type="button"
+                onClick={onToggleMechanicsOverlay}
+                className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-bold border transition-colors cursor-pointer whitespace-nowrap ${
+                  mechanicsOverlayEnabled
+                    ? 'bg-emerald-500/25 border-emerald-400 text-emerald-200'
+                    : 'bg-slate-900/80 border-slate-700 text-slate-300 hover:text-emerald-300'
+                }`}
+                title="切換 3D 弓臂應力熱圖與即時拉弓力曲線疊加層 〔OBJ-TECH〕"
+              >
+                <Activity className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="hidden md:inline">力學疊加層</span>
+              </button>
+            )}
+
+            {/* v2 HK Heritage Panel Quick Trigger */}
+            {onOpenHKHeritage && (
+              <button
+                type="button"
+                onClick={onOpenHKHeritage}
+                className="flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold bg-slate-900/80 hover:bg-slate-800 border border-amber-500/40 text-amber-200 transition-colors cursor-pointer whitespace-nowrap"
+                title="查閱場邊香港射藝文化與內地同源展板 〔OBJ-HK〕"
+              >
+                <Landmark className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden sm:inline">香港展板</span>
+              </button>
+            )}
+
+            {/* v2 Inquiry Missions Direct Trigger */}
+            {onOpenInquiryMissions && (
+              <button
+                type="button"
+                onClick={onOpenInquiryMissions}
+                className="flex items-center gap-1 px-2.5 py-1 rounded text-xs font-bold bg-sky-500/20 hover:bg-sky-500/30 border border-sky-400/50 text-sky-200 transition-colors cursor-pointer whitespace-nowrap"
+                title="開啟公民科四步探究任務與史料標註"
+              >
+                <Compass className="w-3.5 h-3.5 text-sky-300" />
+                <span>探究任務</span>
+              </button>
+            )}
 
             <button
               onClick={onToggleMute}
-              className="p-1.5 text-stone-300 hover:text-amber-300 hover:bg-slate-800/60 rounded transition-colors cursor-pointer"
+              className="p-1 text-stone-300 hover:text-amber-300 hover:bg-slate-800/60 rounded transition-colors cursor-pointer"
               title={isMuted ? '開啟音效' : '靜音'}
               aria-label={isMuted ? '開啟音效' : '靜音'}
             >
@@ -223,10 +261,11 @@ export const TopRitualBar: React.FC<TopRitualBarProps> = ({
 
             <button
               onClick={onOpenGuide}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-amber-950 bg-amber-400 hover:bg-amber-300 rounded shadow-sm transition-colors whitespace-nowrap cursor-pointer"
+              className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-amber-950 bg-amber-400 hover:bg-amber-300 rounded shadow-sm transition-colors whitespace-nowrap cursor-pointer"
             >
               <BookOpen className="w-3.5 h-3.5 text-red-800" />
-              <span>中國隊成就與射箭歷史</span>
+              <span className="hidden sm:inline">中國隊成就與歷史</span>
+              <span className="sm:hidden">史館</span>
             </button>
           </motion.div>
         </motion.header>

@@ -4,6 +4,8 @@ import { TextureGenerator } from './TextureGenerator';
 import { BallisticsEngine, ArrowFlightState, TargetCollisionPlane } from '../physics/BallisticsEngine';
 import { BowConfig, ShotResult, WindState, CameraViewMode } from '../types/archery';
 import { archeryAudio } from '../audio/ArcheryAudio';
+import { MechanicsDebugLayer } from './MechanicsDebugLayer';
+import { MaterialStage } from '../data/inquiry/materialTimeline';
 
 export class ArcheryScene {
   private container: HTMLDivElement;
@@ -64,6 +66,9 @@ export class ArcheryScene {
   private stringPositions!: Float32Array;
   private thumbRingMesh!: THREE.Group;
   public thumbGripAngleDeg: number = 14;
+  public mechanicsDebugLayer!: MechanicsDebugLayer;
+  private activeGhostStage: MaterialStage | null = null;
+  private activeBowConfig!: BowConfig;
 
   // Active Flight & Physics
   private currentArrowState: ArrowFlightState | null = null;
@@ -131,12 +136,14 @@ export class ArcheryScene {
     this.onWindUpdateCallback = onWindUpdate;
     this.onAimUpdateCallback = onAimUpdate;
 
+    this.activeBowConfig = initialBow;
     this.initRenderer();
     this.initScene();
     this.buildFrontierEnvironment();
     this.buildWindParticles();
     this.buildTarget(this.targetDistance);
     this.buildHeroBowAndArrow();
+    this.mechanicsDebugLayer = new MechanicsDebugLayer(this.scene, this.upperLimb, this.lowerLimb);
     this.buildFlightArrow();
     this.applyTimeOfDayAtmosphere(0.0, 0);
 
@@ -1519,6 +1526,9 @@ export class ArcheryScene {
     const flexAngle = this.drawTension * 0.22;
     this.upperLimb.rotation.x = -flexAngle;
     this.lowerLimb.rotation.x = flexAngle;
+    if (this.mechanicsDebugLayer) {
+      this.mechanicsDebugLayer.updateLimbStressColor(this.drawTension);
+    }
 
     // Pull string nock back towards camera (Index 5 is Z)
     const pullBackZ = 0.14 + this.drawTension * 0.28;
@@ -1583,6 +1593,46 @@ export class ArcheryScene {
     this.aimSway.x = Math.max(-0.55, Math.min(0.55, this.aimSway.x));
     this.aimSway.y = Math.max(-0.22, Math.min(0.32, this.aimSway.y));
     this.emitAimOffset();
+    this.refreshMaterialGhost();
+  }
+
+  public setMechanicsOverlayEnabled(enabled: boolean) {
+    if (this.mechanicsDebugLayer) {
+      this.mechanicsDebugLayer.setHeatmapEnabled(enabled, this.drawTension);
+    }
+  }
+
+  public setMaterialGhostStage(stage: MaterialStage | null, bow: BowConfig) {
+    this.activeGhostStage = stage;
+    this.activeBowConfig = bow;
+    this.refreshMaterialGhost();
+  }
+
+  public refreshMaterialGhost() {
+    if (!this.mechanicsDebugLayer) return;
+    if (!this.activeGhostStage) {
+      this.mechanicsDebugLayer.setGhostVisible(false);
+      return;
+    }
+    this.mechanicsDebugLayer.updateMaterialGhostTrajectory(
+      this.activeGhostStage,
+      this.activeBowConfig,
+      this.targetDistance,
+      this.windState,
+      this.aimSway.y,
+      this.aimSway.x
+    );
+  }
+
+  public checkHKBoardClick(clientX: number, clientY: number): boolean {
+    if (!this.mechanicsDebugLayer || !this.renderer || !this.camera) return false;
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
+    const ndcY = -((clientY - rect.top) / rect.height) * 2 + 1;
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.camera);
+    const hits = raycaster.intersectObjects(this.mechanicsDebugLayer.hkBoardGroup.children, true);
+    return hits.length > 0;
   }
 
   /**
@@ -2018,6 +2068,9 @@ export class ArcheryScene {
         banner.rotation.y = wave;
       }
       this.updateWindParticles(dt, time);
+      if (this.mechanicsDebugLayer) {
+        this.mechanicsDebugLayer.tick(time);
+      }
 
       // 2. Breath, Deep-Breath Stabilization, Low-Stamina Tremor, and Aiming Sway
       this.camera.position.copy(this.cameraBasePosition);
@@ -2237,6 +2290,7 @@ export class ArcheryScene {
     archeryAudio.stopArrowWhistle();
     if (this.arrowTrailGeo) this.arrowTrailGeo.dispose();
     if (this.arrowTrailMat) this.arrowTrailMat.dispose();
+    if (this.mechanicsDebugLayer) this.mechanicsDebugLayer.dispose();
     this.renderer.dispose();
   }
 }

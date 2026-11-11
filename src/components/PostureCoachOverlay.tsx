@@ -20,6 +20,7 @@ interface PostureCoachOverlayProps {
   onClose: () => void;
   currentBow: BowConfig;
   currentRank: MartialRank;
+  onOpenMissionMRIT01?: () => void;
 }
 
 type ViewPerspective = '3d_rig' | 'front_stance' | 'top_shoulder';
@@ -154,6 +155,7 @@ export const PostureCoachOverlay: React.FC<PostureCoachOverlayProps> = ({
   onClose,
   currentBow,
   currentRank,
+  onOpenMissionMRIT01,
 }) => {
   const [perspective, setPerspective] = useState<ViewPerspective>('3d_rig');
   const [postureState, setPostureState] = useState<PostureState>('correct');
@@ -162,6 +164,7 @@ export const PostureCoachOverlay: React.FC<PostureCoachOverlayProps> = ({
   const [pitchDeg, setPitchDeg] = useState<number>(14);
   const [autoRotate, setAutoRotate] = useState<boolean>(true);
   const [breathPhase, setBreathPhase] = useState<number>(0);
+  const [showRitualVsKsl, setShowRitualVsKsl] = useState<boolean>(true);
 
   const isDraggingRef = useRef(false);
   const lastMouseXRef = useRef(0);
@@ -411,6 +414,19 @@ export const PostureCoachOverlay: React.FC<PostureCoachOverlayProps> = ({
                 弊病：聳肩浮踵勢
               </button>
             </div>
+
+            {/* M-RIT-01 Side-by-Side Toggle Button */}
+            <button
+              type="button"
+              onClick={() => setShowRitualVsKsl((prev) => !prev)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
+                showRitualVsKsl
+                  ? 'bg-sky-500/20 border-sky-400 text-sky-200'
+                  : 'bg-stone-900 border-stone-700 text-stone-300 hover:text-white'
+              }`}
+            >
+              M-RIT-01：《射義》vs 奧運KSL對照
+            </button>
 
             <button
               onClick={onClose}
@@ -1473,20 +1489,46 @@ export const PostureCoachOverlay: React.FC<PostureCoachOverlayProps> = ({
               </div>
             </div>
 
-            {/* Section 3: Practical In-Game Tactical Tip */}
-            <div className="rounded-xl bg-gradient-to-r from-amber-950/40 via-stone-900 to-stone-900 border border-amber-500/30 p-3.5 flex items-start gap-3">
-              <Sparkles className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-              <div className="text-xs space-y-1">
-                <div className="font-bold text-amber-300">
-                  實戰連動提示：身法審固與「屏息凝神 (Space)」
+            {/* Section 3: M-RIT-01 Side-by-Side Civilisation Logic Comparison (《射義》正己而後發 vs 奧運 KSL 生物力學) */}
+            {showRitualVsKsl && (
+              <div className="rounded-xl bg-slate-950/95 border border-sky-500/45 p-3.5 space-y-2.5 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-bold text-sky-300">
+                    M-RIT-01 兩種文明邏輯並列對照 〔OBJ-IDENTITY〕
+                  </span>
+                  {onOpenMissionMRIT01 && (
+                    <button
+                      type="button"
+                      onClick={onOpenMissionMRIT01}
+                      className="px-2.5 py-1 rounded bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-[11px] cursor-pointer"
+                    >
+                      前往 M-RIT-01 撰寫反思 →
+                    </button>
+                  )}
                 </div>
-                <p className="text-stone-300 leading-relaxed">
-                  在實戰拉弓時，當開弓達 <span className="text-amber-300 font-semibold">85%–100%</span>{' '}
-                  並按住 <kbd className="px-1.5 py-0.5 bg-stone-800 rounded border border-stone-700 font-mono text-[10px]">Space</kbd>{' '}
-                  進入「氣沉丹田 · 屏息凝神」，即模擬清代步射「四平馬步 + 順肩鎖骨」之審固狀態，可消除 86% 準星晃動以精準貫中紅心。
+                <p className="text-[11px] text-amber-200 font-semibold">
+                  探究提問：《射義》「正己而後發」與奧運 KSL 生物力學標準，分別追求什麼？
                 </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-[11px]">
+                  <div className="p-2.5 rounded bg-stone-900 border border-amber-500/35 space-y-1">
+                    <div className="font-bold text-amber-300">
+                      中華禮射《禮記·射義》：「正己而後發」
+                    </div>
+                    <p className="text-stone-300 leading-relaxed">
+                      追求<strong>「內志正、外體直」與心性德行修養</strong>。強調「發而不中，反求諸己」，透過立身中正與呼吸調息達到不驕不躁的心理定力。
+                    </p>
+                  </div>
+                  <div className="p-2.5 rounded bg-stone-900 border border-sky-500/35 space-y-1">
+                    <div className="font-bold text-sky-300">
+                      現代奧運 KSL (BEST) 生物力學標準
+                    </div>
+                    <p className="text-stone-300 leading-relaxed">
+                      追求<strong>「骨骼剛性對齊、背肌楔入擴張與零代償重複性」</strong>。以 T 字骨橋與過響片毫米級行程確保 70 米出箭初速與角度高度一致。
+                    </p>
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       </div>

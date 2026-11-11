@@ -21,6 +21,15 @@ import {
 } from 'lucide-react';
 import { MartialRank, BowConfig, HistoricalNote } from '../types/archery';
 import { PostureCoachOverlay } from './PostureCoachOverlay';
+import { InquiryMissionPanel } from './InquiryMissionPanel';
+import { AICommentaryDraftState } from '../state/useInquiryProgress';
+
+export type GuideTab =
+  | 'china_olympic'
+  | 'chinese_history'
+  | 'comparison'
+  | 'gameplay'
+  | 'inquiry_missions';
 
 interface ArcheryGuideModalProps {
   onClose: () => void;
@@ -30,10 +39,18 @@ interface ArcheryGuideModalProps {
   isFetchingNote: boolean;
   noteError: string | null;
   initialOpenDrawer?: boolean;
+  initialTab?: GuideTab;
+  initialMissionId?: string;
   onRequestNewNote: () => void;
+  reflections: Record<string, string>;
+  completedMissionIds: string[];
+  sourceAnnotations: Record<string, string[]>;
+  aiCommentary: AICommentaryDraftState;
+  storageWarning: boolean;
+  onSaveReflection: (missionId: string, text: string) => void;
+  onToggleSourceKeyword: (sourceId: string, keyword: string) => void;
+  onUpdateAICommentary: (patch: Partial<AICommentaryDraftState>) => void;
 }
-
-type GuideTab = 'china_olympic' | 'chinese_history' | 'comparison' | 'gameplay';
 
 interface OlympicAchievementItem {
   yearAndGames: string;
@@ -164,11 +181,22 @@ export const ArcheryGuideModal: React.FC<ArcheryGuideModalProps> = ({
   isFetchingNote,
   noteError,
   initialOpenDrawer = false,
+  initialTab = 'china_olympic',
+  initialMissionId,
   onRequestNewNote,
+  reflections,
+  completedMissionIds,
+  sourceAnnotations,
+  aiCommentary,
+  storageWarning,
+  onSaveReflection,
+  onToggleSourceKeyword,
+  onUpdateAICommentary,
 }) => {
-  const [activeTab, setActiveTab] = useState<GuideTab>('china_olympic');
+  const [activeTab, setActiveTab] = useState<GuideTab>(initialTab);
+  const [focusedMissionId, setFocusedMissionId] = useState<string | undefined>(initialMissionId);
   const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(
-    initialOpenDrawer || historicalNotes.length > 0 || isFetchingNote
+    initialOpenDrawer || (initialTab !== 'inquiry_missions' && (historicalNotes.length > 0 || isFetchingNote))
   );
   const [isPostureCoachOpen, setIsPostureCoachOpen] = useState<boolean>(false);
   const [selectedNoteIndex, setSelectedNoteIndex] = useState<number>(0);
@@ -309,6 +337,22 @@ export const ArcheryGuideModal: React.FC<ArcheryGuideModalProps> = ({
           >
             <Compass className="w-3.5 h-3.5" />
             <span>奧運賽制與操作指南</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('inquiry_missions');
+              setIsDrawerOpen(false);
+            }}
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
+              activeTab === 'inquiry_missions'
+                ? 'bg-purple-500 text-white shadow-sm'
+                : 'bg-slate-900 text-amber-300 hover:bg-slate-800 border border-amber-500/35'
+            }`}
+          >
+            <BookOpen className="w-3.5 h-3.5 text-amber-300" />
+            <span>探究任務 ({completedMissionIds.length}/4)</span>
           </button>
         </div>
 
@@ -540,6 +584,22 @@ export const ArcheryGuideModal: React.FC<ArcheryGuideModalProps> = ({
                 </div>
               </div>
             )}
+
+            {/* TAB 5: INQUIRY MISSIONS & STUDENT-AUTHORED WORKSPACE (探究任務) */}
+            {activeTab === 'inquiry_missions' && (
+              <InquiryMissionPanel
+                initialMissionId={focusedMissionId}
+                reflections={reflections}
+                completedMissionIds={completedMissionIds}
+                sourceAnnotations={sourceAnnotations}
+                aiCommentary={aiCommentary}
+                storageWarning={storageWarning}
+                onSaveReflection={onSaveReflection}
+                onToggleSourceKeyword={onToggleSourceKeyword}
+                onUpdateAICommentary={onUpdateAICommentary}
+                onOpenPostureCoachComparison={() => setIsPostureCoachOpen(true)}
+              />
+            )}
           </div>
 
           {/* Right Slide-Over Drawer: AI Olympic Commentary & Chinese Archery History Notes */}
@@ -733,6 +793,12 @@ export const ArcheryGuideModal: React.FC<ArcheryGuideModalProps> = ({
         onClose={() => setIsPostureCoachOpen(false)}
         currentBow={currentBow}
         currentRank={currentRank}
+        onOpenMissionMRIT01={() => {
+          setIsPostureCoachOpen(false);
+          setFocusedMissionId('M-RIT-01');
+          setActiveTab('inquiry_missions');
+          setIsDrawerOpen(false);
+        }}
       />
     </div>
   );

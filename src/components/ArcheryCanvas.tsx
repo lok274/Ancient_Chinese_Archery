@@ -10,6 +10,7 @@ import {
 } from '../types/archery';
 import { BallisticsEngine } from '../physics/BallisticsEngine';
 import { archeryAudio } from '../audio/ArcheryAudio';
+import { MaterialStage } from '../data/inquiry/materialTimeline';
 
 interface ArcheryCanvasProps {
   currentBow: BowConfig;
@@ -32,6 +33,9 @@ interface ArcheryCanvasProps {
   onWindChange?: (wind: WindState) => void;
   onAimOffsetChange?: (aimOffsetCm: { x: number; y: number }) => void;
   onThumbAngleChange?: (angleDeg: number) => void;
+  mechanicsOverlayEnabled?: boolean;
+  materialGhostStage?: MaterialStage | null;
+  onClickHKBoard?: () => void;
 }
 
 const GUST_LABELS = [
@@ -66,6 +70,9 @@ export const ArcheryCanvas: React.FC<ArcheryCanvasProps> = ({
   onWindChange,
   onAimOffsetChange,
   onThumbAngleChange,
+  mechanicsOverlayEnabled = false,
+  materialGhostStage = null,
+  onClickHKBoard,
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<ArcheryScene | null>(null);
@@ -421,6 +428,20 @@ export const ArcheryCanvas: React.FC<ArcheryCanvasProps> = ({
     }
   }, [timeOfDayProgress, currentRank.targetDistance]);
 
+  // Sync v2 Mechanics Overlay (3D bow limb stress heatmap)
+  useEffect(() => {
+    if (sceneRef.current) {
+      sceneRef.current.setMechanicsOverlayEnabled(mechanicsOverlayEnabled);
+    }
+  }, [mechanicsOverlayEnabled]);
+
+  // Sync v2 Material Evolution Ghost Trajectory (歷史對照軌跡（模擬）)
+  useEffect(() => {
+    if (sceneRef.current) {
+      sceneRef.current.setMaterialGhostStage(materialGhostStage, currentBow);
+    }
+  }, [materialGhostStage, currentBow, currentRank.targetDistance]);
+
   // Event listeners for resetting or advancing arrow
   useEffect(() => {
     const onReadyNext = () => {
@@ -677,6 +698,18 @@ export const ArcheryCanvas: React.FC<ArcheryCanvasProps> = ({
   // Mouse & Touch events
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return; // Only primary button
+    // Check if the user clicked the 3D side-range Hong Kong Heritage exhibition board while not drawing
+    if (
+      gameStateRef.current === 'idle' &&
+      !isHoldingRef.current &&
+      !isDrawnReadyRef.current &&
+      sceneRef.current?.checkHKBoardClick(e.clientX, e.clientY)
+    ) {
+      e.preventDefault();
+      if (onClickHKBoard) onClickHKBoard();
+      return;
+    }
+
     e.preventDefault();
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
