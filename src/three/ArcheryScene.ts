@@ -1046,96 +1046,19 @@ export class ArcheryScene {
     this.bowGroup.rotation.y = 0.06;
     this.camera.add(this.bowGroup);
 
-    // 5. Build 3D Ming-Era Waist Quiver (明代步射箭囊/撒袋) at lower-left of player HUD view
-    this.buildPlayerQuiver();
-
     this.scene.add(this.camera);
   }
 
   /**
-   * Builds a 3D Ming-era lacquered leather & brass-trimmed waist quiver holding 6 fanned 3D arrows
+   * Initializes quiver state without rendering a 3D quiver in the camera viewport
    */
   private buildPlayerQuiver() {
     this.quiverGroup = new THREE.Group();
     this.quiverArrows = [];
-
-    // Quiver leather body (黑漆壓花皮箭壺)
-    const leatherMat = new THREE.MeshStandardMaterial({
-      color: 0x261712,
-      roughness: 0.55,
-      metalness: 0.15,
-    });
-    const crimsonSilkMat = new THREE.MeshStandardMaterial({
-      color: 0x7c1d1d,
-      roughness: 0.65,
-      metalness: 0.1,
-    });
-    const brassMat = new THREE.MeshStandardMaterial({
-      color: 0xd4af37,
-      roughness: 0.28,
-      metalness: 0.85,
-    });
-
-    // Main quiver scabbard tube
-    const bodyGeo = new THREE.CylinderGeometry(0.048, 0.036, 0.34, 16);
-    const bodyMesh = new THREE.Mesh(bodyGeo, leatherMat);
-    bodyMesh.position.y = -0.17;
-    bodyMesh.scale.set(1.35, 1, 0.72);
-    this.quiverGroup.add(bodyMesh);
-
-    // Crimson brocade throat wrap (織錦壺口)
-    const throatGeo = new THREE.CylinderGeometry(0.051, 0.049, 0.065, 16);
-    const throatMesh = new THREE.Mesh(throatGeo, crimsonSilkMat);
-    throatMesh.position.y = -0.025;
-    throatMesh.scale.set(1.36, 1, 0.74);
-    this.quiverGroup.add(throatMesh);
-
-    // Upper & Middle Brass Rim Fittings (黃銅束箍)
-    const upperRimGeo = new THREE.CylinderGeometry(0.053, 0.053, 0.014, 16);
-    const upperRim = new THREE.Mesh(upperRimGeo, brassMat);
-    upperRim.position.y = 0.005;
-    upperRim.scale.set(1.37, 1, 0.75);
-    this.quiverGroup.add(upperRim);
-
-    const midRim = new THREE.Mesh(upperRimGeo, brassMat);
-    midRim.position.y = -0.11;
-    midRim.scale.set(1.28, 1, 0.70);
-    this.quiverGroup.add(midRim);
-
-    // 6 Individual 3D Ming-era Arrows fanned inside the quiver
-    // Oriented with nock and eagle feather fletchings protruding upward out of the quiver mouth
-    for (let i = 0; i < 6; i++) {
-      const arrowWrapper = new THREE.Group();
-      const arrow3D = this.createArrowModel();
-
-      // Rotate so nock (+Z in arrow model) points upward (+Y) and tip (-Z) sits deep inside quiver (-Y)
-      arrow3D.rotation.x = Math.PI / 2;
-      // Add subtle authentic axial spin so eagle feathers interlock naturally
-      arrow3D.rotation.z = i * 0.9;
-      arrowWrapper.add(arrow3D);
-
-      // Fan the 6 arrows neatly across the quiver opening
-      const spreadIndex = i - 2.5;
-      arrowWrapper.position.set(
-        spreadIndex * 0.015,
-        0.16 + (i % 2) * 0.012,
-        (i % 2 === 0 ? 1 : -1) * 0.008
-      );
-      arrowWrapper.rotation.z = -spreadIndex * 0.045;
-      arrowWrapper.rotation.x = (i % 2 === 0 ? 1 : -1) * 0.025;
-
-      this.quiverGroup.add(arrowWrapper);
-      this.quiverArrows.push(arrowWrapper);
-    }
-
-    // Position in lower-left peripheral vision of the archer
-    this.quiverGroup.position.set(-0.32, -0.26, -0.52);
-    this.quiverGroup.rotation.set(0.24, 0.32, -0.18);
-    this.camera.add(this.quiverGroup);
   }
 
   /**
-   * Updates the real-time 3D arrows visible in the quiver as the player shoots
+   * Updates the remaining arrow count
    */
   public setRemainingArrows(remainingCount: number) {
     this.remainingQuiverCount = Math.max(0, Math.min(6, remainingCount));
@@ -1559,7 +1482,13 @@ export class ArcheryScene {
     }
 
     if (this.drawTension > 0.01) {
-      archeryAudio.updateBreathing(breathElapsed, stamina, isFatigued, this.isDeepBreath);
+      archeryAudio.updateBreathing(
+        breathElapsed,
+        stamina,
+        isFatigued,
+        this.isDeepBreath,
+        this.drawTension
+      );
     } else {
       archeryAudio.stopBreathing(false);
     }

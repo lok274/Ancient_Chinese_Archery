@@ -36,6 +36,8 @@ interface ArcheryCanvasProps {
   mechanicsOverlayEnabled?: boolean;
   materialGhostStage?: MaterialStage | null;
   onClickHKBoard?: () => void;
+  gatePassed?: boolean;
+  onLockedDrawAttempt?: () => void;
 }
 
 const GUST_LABELS = [
@@ -73,6 +75,8 @@ export const ArcheryCanvas: React.FC<ArcheryCanvasProps> = ({
   mechanicsOverlayEnabled = false,
   materialGhostStage = null,
   onClickHKBoard,
+  gatePassed = true,
+  onLockedDrawAttempt,
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<ArcheryScene | null>(null);
@@ -88,6 +92,8 @@ export const ArcheryCanvas: React.FC<ArcheryCanvasProps> = ({
   const pointerPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const gameStateRef = useRef<GameState>(gameState);
   gameStateRef.current = gameState;
+  const gatePassedRef = useRef<boolean>(gatePassed);
+  gatePassedRef.current = gatePassed;
 
   const currentBowRef = useRef<BowConfig>(currentBow);
   currentBowRef.current = currentBow;
@@ -549,6 +555,14 @@ export const ArcheryCanvas: React.FC<ArcheryCanvasProps> = ({
   const startDraw = useCallback(() => {
     if (!sceneRef.current) return;
 
+    // Section 6 Gate Lock (CRITICAL): Refuse to begin a draw when gatePassed(stageId) === false
+    if (!gatePassedRef.current) {
+      if (onLockedDrawAttempt) {
+        onLockedDrawAttempt();
+      }
+      return;
+    }
+
     // If arrow already struck, clicking advances to next arrow
     if (gameStateRef.current === 'impact') {
       onNextArrowRequest();
@@ -595,7 +609,7 @@ export const ArcheryCanvas: React.FC<ArcheryCanvasProps> = ({
 
     cancelAnimationFrame(drawAnimationTimerRef.current);
     drawAnimationTimerRef.current = requestAnimationFrame(updateDrawing);
-  }, [fireArrow, onNextArrowRequest, setGameState, triggerStochasticWindGust, updateDrawing]);
+  }, [fireArrow, onLockedDrawAttempt, onNextArrowRequest, setGameState, triggerStochasticWindGust, updateDrawing]);
 
   // End holding (mouse up)
   const stopHolding = useCallback(() => {
@@ -624,6 +638,12 @@ export const ArcheryCanvas: React.FC<ArcheryCanvasProps> = ({
       if (!sceneRef.current) return;
 
       if (active) {
+        if (!gatePassedRef.current) {
+          if (onLockedDrawAttempt) {
+            onLockedDrawAttempt();
+          }
+          return;
+        }
         if (gameStateRef.current === 'flight' || gameStateRef.current === 'round_end') return;
         if (gameStateRef.current === 'impact') {
           onNextArrowRequest();
@@ -651,7 +671,7 @@ export const ArcheryCanvas: React.FC<ArcheryCanvasProps> = ({
         }
       }
     },
-    [onNextArrowRequest, setGameState, startDraw]
+    [onLockedDrawAttempt, onNextArrowRequest, setGameState, startDraw]
   );
 
   // Window event listeners for UI buttons, manual thumb-grip controls & Deep Breath button

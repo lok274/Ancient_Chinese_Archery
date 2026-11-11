@@ -2,31 +2,34 @@
  * Hong Kong Archery Heritage Anchor Modal (香港射藝文化與內地同源考據視窗)
  * Educational Objective: OBJ-HK — 認識內地與香港系出同源的關係
  *
- * Triggered by clicking the 3D side-range exhibition board prop inside ArcheryScene
- * (or the peripheral quick button) ONLY when the bow is not drawn.
- * Portrays Hong Kong as an active participant in an ongoing cultural exchange within
- * the national tradition, pairing every HK entry with its mainland counterpart.
+ * Implements Section 8.5 & 8.8:
+ * - Viewable freely (not gate-locked) so students can explore at will.
+ * - Footer includes a single `測驗你的認識` button that opens the 2 MC questions from `stageQuizBank.ts`
+ *   under the `heritage-hk` pseudo-stage in a peripheral drawer.
+ * - Passing awards the `香港射藝探究徽章` shown in `ExamSummaryModal`.
  */
 
 import React from 'react';
-import { X, MapPin, Landmark, Tag, ArrowUpRight, BookOpen } from 'lucide-react';
+import { X, MapPin, Landmark, Tag, Award, Sparkles, CheckCircle2 } from 'lucide-react';
 import { HK_HERITAGE_NOTES } from '../data/inquiry/hkHeritageNotes';
 import { SOURCE_ANCHORS } from '../data/inquiry/sourceAnchors';
 
 interface HKHeritagePanelProps {
   isOpen: boolean;
   onClose: () => void;
+  isHeritageBadgeEarned: boolean;
   sourceAnnotations: Record<string, string[]>;
   onToggleSourceKeyword: (sourceId: string, keyword: string) => void;
-  onOpenHKMission: () => void;
+  onOpenHeritageQuiz: () => void;
 }
 
 export const HKHeritagePanel: React.FC<HKHeritagePanelProps> = ({
   isOpen,
   onClose,
+  isHeritageBadgeEarned,
   sourceAnnotations,
   onToggleSourceKeyword,
-  onOpenHKMission,
+  onOpenHeritageQuiz,
 }) => {
   if (!isOpen) return null;
 
@@ -41,7 +44,7 @@ export const HKHeritagePanel: React.FC<HKHeritagePanelProps> = ({
             </div>
             <div>
               <div className="text-[10px] font-mono text-amber-400">
-                8.6 場邊 3D 展板 · 認識內地與香港系出同源的關係 〔OBJ-HK〕
+                8.8 場邊 3D 展板 · 認識內地與香港系出同源的關係 〔OBJ-HK〕
               </div>
               <h2 className="text-base sm:text-lg font-bold text-white">
                 香江射藝尋根：從新界武舉文物到當代兩地文化共融
@@ -50,15 +53,12 @@ export const HKHeritagePanel: React.FC<HKHeritagePanelProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onOpenHKMission}
-              className="flex items-center gap-1 px-3 py-1.5 rounded bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs cursor-pointer"
-            >
-              <BookOpen className="w-3.5 h-3.5" />
-              <span>前往 M-HK-01 探究任務</span>
-              <ArrowUpRight className="w-3.5 h-3.5" />
-            </button>
+            {isHeritageBadgeEarned && (
+              <span className="px-2.5 py-1 rounded-md bg-emerald-950 border border-emerald-400/60 text-emerald-300 font-bold text-xs flex items-center gap-1">
+                <Award className="w-3.5 h-3.5 text-amber-400" />
+                <span>已獲香港射藝探究徽章</span>
+              </span>
+            )}
             <button
               type="button"
               onClick={onClose}
@@ -148,18 +148,37 @@ export const HKHeritagePanel: React.FC<HKHeritagePanelProps> = ({
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="px-5 py-3 bg-slate-950 border-t border-slate-800 flex items-center justify-between shrink-0">
+        {/* Footer with Section 8.5 `測驗你的認識` button */}
+        <div className="px-5 py-3 bg-slate-950 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2 shrink-0">
           <span className="text-[11px] text-slate-400">
-            提示：你在賽場左側看到的 3D 實體展板可隨時於未拉弓狀態下點擊開啟本面板。
+            完成 2 道選修選擇題即可獲頒「香港射藝探究徽章」（不影響主關卡射箭准入）。
           </span>
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-5 py-1.5 rounded bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs cursor-pointer"
-          >
-            返回 3D 射箭賽場
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onOpenHeritageQuiz}
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded bg-sky-400 hover:bg-sky-300 text-slate-950 font-bold text-xs cursor-pointer shadow-md transition-colors"
+            >
+              {isHeritageBadgeEarned ? (
+                <>
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>重溫測驗（已獲徽章）</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>測驗你的認識</span>
+                </>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs cursor-pointer"
+            >
+              返回 3D 射箭賽場
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -1,14 +1,27 @@
 import React, { useEffect } from 'react';
 import confetti from 'canvas-confetti';
 import { MartialRank, ShotResult, MARTIAL_RANKS } from '../types/archery';
-import { Trophy, RotateCcw, ArrowRight, Medal, AlertCircle, BookOpen, Users } from 'lucide-react';
+import {
+  Trophy,
+  RotateCcw,
+  ArrowRight,
+  Medal,
+  AlertCircle,
+  BookOpen,
+  Users,
+  Award,
+  Lock,
+} from 'lucide-react';
 import { archeryAudio } from '../audio/ArcheryAudio';
 
 interface ExamSummaryModalProps {
   currentRank: MartialRank;
   shotResults: ShotResult[];
+  isHeritageBadgeEarned: boolean;
+  isNextStageGatePassed: boolean;
   onRetry: () => void;
   onNextRank: (nextRank: MartialRank) => void;
+  onOpenNextStageQuiz: (nextRank: MartialRank) => void;
   onOpenRelayModal?: () => void;
 }
 
@@ -38,8 +51,11 @@ const STAGE_CHINA_MILESTONE: Record<string, { title: string; detail: string }> =
 export const ExamSummaryModal: React.FC<ExamSummaryModalProps> = ({
   currentRank,
   shotResults,
+  isHeritageBadgeEarned,
+  isNextStageGatePassed,
   onRetry,
   onNextRank,
+  onOpenNextStageQuiz,
   onOpenRelayModal,
 }) => {
   const totalScore = shotResults.reduce((sum, r) => sum + r.score, 0);
@@ -87,6 +103,14 @@ export const ExamSummaryModal: React.FC<ExamSummaryModalProps> = ({
           <p className="text-xs text-slate-300 mt-0.5">
             {currentRank.frontierPass} · 射距 {currentRank.targetDistance} 米
           </p>
+
+          {/* Section 8.5 Optional Heritage Badge (香港射藝探究徽章) */}
+          {isHeritageBadgeEarned && (
+            <div className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-400/20 border border-amber-400 text-amber-300 text-xs font-bold shadow-sm">
+              <Award className="w-4 h-4 text-amber-400" />
+              <span>已獲頒：香港射藝探究徽章 〔OBJ-HK〕</span>
+            </div>
+          )}
         </div>
 
         {/* Qualification Result Box */}
@@ -153,7 +177,7 @@ export const ExamSummaryModal: React.FC<ExamSummaryModalProps> = ({
           <p className="text-slate-200 leading-relaxed">{milestone.detail}</p>
         </div>
 
-        {/* Action Buttons + Section 8.5 Peer Relay Button (邀請搭檔接力) */}
+        {/* Action Buttons + Section 8.7 Peer Relay Button & Section 5 Gate-Locked Next Stage Affordance */}
         <div className="flex flex-wrap items-center gap-2.5 w-full mt-4">
           <button
             onClick={onRetry}
@@ -175,13 +199,26 @@ export const ExamSummaryModal: React.FC<ExamSummaryModalProps> = ({
           )}
 
           {isPassed && nextRank ? (
-            <button
-              onClick={() => onNextRank(nextRank)}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 px-3 text-xs font-bold text-amber-950 bg-amber-400 hover:bg-amber-300 rounded-lg shadow-md transition-colors cursor-pointer"
-            >
-              <span>晉級 · {nextRank.title}</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
+            isNextStageGatePassed ? (
+              <button
+                onClick={() => onNextRank(nextRank)}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 px-3 text-xs font-bold text-amber-950 bg-amber-400 hover:bg-amber-300 rounded-lg shadow-md transition-colors cursor-pointer"
+              >
+                <span>晉級 · {nextRank.title}</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => onOpenNextStageQuiz(nextRank)}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 px-3 text-xs font-bold text-amber-950 bg-amber-400 hover:bg-amber-300 rounded-lg shadow-md transition-colors cursor-pointer whitespace-nowrap"
+                title={`下一關 (${nextRank.title}) 尚未通過准入，點擊前往閱讀與測驗`}
+              >
+                <Lock className="w-3.5 h-3.5" />
+                <span>下一關未解鎖 · 前往測驗</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            )
           ) : (
             isPassed && (
               <div className="flex-1 flex items-center justify-center py-2.5 px-3 text-xs font-bold text-amber-300 bg-amber-950/60 border border-amber-500 rounded-lg">

@@ -11,7 +11,8 @@ import {
   Flame,
   Activity,
   Landmark,
-  Compass,
+  Lock,
+  CheckCircle2,
 } from 'lucide-react';
 
 interface TopRitualBarProps {
@@ -27,7 +28,8 @@ interface TopRitualBarProps {
   onOpenGuide: () => void;
   mechanicsOverlayEnabled?: boolean;
   onToggleMechanicsOverlay?: () => void;
-  onOpenInquiryMissions?: () => void;
+  gatePassed?: boolean;
+  onOpenStageGate?: () => void;
   onOpenHKHeritage?: () => void;
   roundKey?: number;
   isVisible?: boolean;
@@ -88,7 +90,8 @@ export const TopRitualBar: React.FC<TopRitualBarProps> = ({
   onOpenGuide,
   mechanicsOverlayEnabled = false,
   onToggleMechanicsOverlay,
-  onOpenInquiryMissions,
+  gatePassed = false,
+  onOpenStageGate,
   onOpenHKHeritage,
   roundKey = 0,
   isVisible = true,
@@ -194,7 +197,7 @@ export const TopRitualBar: React.FC<TopRitualBarProps> = ({
             </motion.div>
           </div>
 
-          {/* Zone 3: Scoreboard, Mechanics Overlay Toggle (v2), HK Board & Guide Buttons */}
+          {/* Zone 3: Scoreboard, Gate Badge (已通過准入 / 未通過准入), Mechanics Overlay Toggle, HK Board & Guide Buttons */}
           <motion.div
             variants={ritualItemVariants}
             className="flex items-center gap-1.5 shrink-0"
@@ -206,6 +209,36 @@ export const TopRitualBar: React.FC<TopRitualBarProps> = ({
               </span>
               <span className="text-[10px] text-stone-400">/60</span>
             </div>
+
+            {/* Section 5 & 8.1 Gate Status Badge (已通過准入 / 未通過准入) */}
+            {onOpenStageGate && (
+              <button
+                type="button"
+                onClick={onOpenStageGate}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-bold border transition-colors cursor-pointer whitespace-nowrap ${
+                  gatePassed
+                    ? 'bg-emerald-500/20 hover:bg-emerald-500/30 border-emerald-400/60 text-emerald-200'
+                    : 'bg-amber-500/25 hover:bg-amber-500/35 border-amber-400 text-amber-200 animate-pulse'
+                }`}
+                title={
+                  gatePassed
+                    ? '已通過本關卡知識准入（點擊於右側欄重溫史料或進行 8.9 史料標註）'
+                    : '未通過准入：點擊閱讀資料並完成選擇題以解鎖拉弓'
+                }
+              >
+                {gatePassed ? (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>已通過准入</span>
+                  </>
+                ) : (
+                  <>
+                    <Lock className="w-3.5 h-3.5 text-amber-300" />
+                    <span>未通過准入</span>
+                  </>
+                )}
+              </button>
+            )}
 
             {/* v2 Mechanics Overlay Toggle Icon (力學疊加層) */}
             {onToggleMechanicsOverlay && (
@@ -234,19 +267,6 @@ export const TopRitualBar: React.FC<TopRitualBarProps> = ({
               >
                 <Landmark className="w-3.5 h-3.5 text-amber-400" />
                 <span className="hidden sm:inline">香港展板</span>
-              </button>
-            )}
-
-            {/* v2 Inquiry Missions Direct Trigger */}
-            {onOpenInquiryMissions && (
-              <button
-                type="button"
-                onClick={onOpenInquiryMissions}
-                className="flex items-center gap-1 px-2.5 py-1 rounded text-xs font-bold bg-sky-500/20 hover:bg-sky-500/30 border border-sky-400/50 text-sky-200 transition-colors cursor-pointer whitespace-nowrap"
-                title="開啟公民科四步探究任務與史料標註"
-              >
-                <Compass className="w-3.5 h-3.5 text-sky-300" />
-                <span>探究任務</span>
               </button>
             )}
 

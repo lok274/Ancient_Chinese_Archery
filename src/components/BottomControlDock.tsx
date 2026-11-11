@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { BowConfig, CameraViewMode, BOW_PRESETS, MARTIAL_RANKS, MartialRank } from '../types/archery';
-import { ChevronDown, ChevronUp, Eye, RotateCcw, Award, Info } from 'lucide-react';
+import { ChevronDown, ChevronUp, Eye, RotateCcw, Award, Info, Lock, ShieldAlert, BookOpen } from 'lucide-react';
 
 interface BottomControlDockProps {
   currentBow: BowConfig;
@@ -10,6 +10,10 @@ interface BottomControlDockProps {
   cameraMode: CameraViewMode;
   onSelectCameraMode: (mode: CameraViewMode) => void;
   onResetRound: () => void;
+  onResetCurrentStageGate: () => void;
+  isCurrentStageGatePassed: boolean;
+  isStageGatePassed: (stageId: string) => boolean;
+  onOpenStageGate: () => void;
   disabled?: boolean;
 }
 
@@ -21,21 +25,46 @@ export const BottomControlDock: React.FC<BottomControlDockProps> = ({
   cameraMode,
   onSelectCameraMode,
   onResetRound,
+  onResetCurrentStageGate,
+  isCurrentStageGatePassed,
+  isStageGatePassed,
+  onOpenStageGate,
   disabled = false,
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [hoveredTooltip, setHoveredTooltip] = useState<'bow' | 'rank' | null>(null);
+  const [confirmingStageReset, setConfirmingStageReset] = useState(false);
 
-  // Immediately hide any active tooltip when shooting / drawing begins
+  // Immediately hide any active tooltip or confirm state when shooting / drawing begins
   React.useEffect(() => {
     if (disabled) {
       setHoveredTooltip(null);
+      setConfirmingStageReset(false);
     }
   }, [disabled]);
 
+  // Reset confirmation when switching stage
+  React.useEffect(() => {
+    setConfirmingStageReset(false);
+  }, [currentRank.id]);
+
+  const currentIndex = MARTIAL_RANKS.findIndex((r) => r.id === currentRank.id);
+  const nextRank =
+    currentIndex < MARTIAL_RANKS.length - 1 ? MARTIAL_RANKS[currentIndex + 1] : null;
+  const isNextRankLocked = nextRank ? !isStageGatePassed(nextRank.id) : false;
+
+  const handleStageResetClick = () => {
+    if (!confirmingStageReset) {
+      setConfirmingStageReset(true);
+      return;
+    }
+    setConfirmingStageReset(false);
+    onResetCurrentStageGate();
+  };
+
   return (
     <div
-      className={`absolute bottom-3 left-1/2 -translate-x-1/2 z-20 w-auto max-w-[92vw] flex flex-col items-center transition-all duration-200 ${
+      className={`absolute bottom-3 left-1/2 -translate-x-1/2 z-20 w-auto max-w-[94vw] flex flex-col items-center transition-all duration-200 ${
         disabled
           ? 'opacity-0 translate-y-3 pointer-events-none'
           : 'opacity-100 translate-y-0 pointer-events-auto'
@@ -62,7 +91,7 @@ export const BottomControlDock: React.FC<BottomControlDockProps> = ({
 
       {/* Compact Single-Row Dock Container */}
       {!isCollapsed && (
-        <div className="relative px-3.5 py-2 bg-stone-950/80 backdrop-blur-xs border border-stone-800/85 rounded-md shadow-xl text-stone-200">
+        <div className="relative px-3.5 py-2 bg-stone-950/85 backdrop-blur-xs border border-stone-800/85 rounded-md shadow-xl text-stone-200">
           {/* Historical Context Hover Tooltip Card */}
           {!disabled && hoveredTooltip === 'bow' && (
             <div className="absolute bottom-full left-0 mb-2 w-76 p-3 bg-stone-900/95 border border-amber-700/60 rounded-md shadow-2xl text-xs pointer-events-none transition-opacity duration-150 z-30">
@@ -100,7 +129,7 @@ export const BottomControlDock: React.FC<BottomControlDockProps> = ({
             </div>
           )}
 
-          <div className="flex flex-wrap items-center justify-center gap-3">
+          <div className="flex flex-wrap items-center justify-center gap-2.5">
             {/* 1. Bow Selector (選弓) */}
             <div
               className="flex items-center gap-1.5 relative"
@@ -149,11 +178,15 @@ export const BottomControlDock: React.FC<BottomControlDockProps> = ({
                 disabled={disabled}
                 className="px-2 py-1 text-xs bg-stone-900 border border-stone-700 rounded text-amber-100 hover:border-amber-600 focus:outline-hidden focus:border-amber-500 transition-colors cursor-pointer"
               >
-                {MARTIAL_RANKS.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.title} ({r.targetDistance}米)
-                  </option>
-                ))}
+                {MARTIAL_RANKS.map((r) => {
+                  const passed = isStageGatePassed(r.id);
+                  return (
+                    <option key={r.id} value={r.id}>
+                      {passed ? '✓ ' : '🔒 '}
+                      {r.title} ({r.targetDistance}米)
+                    </option>
+                  );
+                })}
               </select>
             </div>
 
@@ -199,15 +232,59 @@ export const BottomControlDock: React.FC<BottomControlDockProps> = ({
               </div>
             </div>
 
-            {/* 4. Action: Reset Round (重置應試) */}
-            <button
-              onClick={onResetRound}
-              className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-stone-200 bg-stone-800 hover:bg-stone-700 border border-stone-600 rounded transition-colors cursor-pointer whitespace-nowrap"
-              title="重置本輪六矢考核"
-            >
-              <RotateCcw className="w-3 h-3" />
-              <span>重置</span>
-            </button>
+            <span className="hidden sm:inline text-stone-700">|</span>
+
+            {/* 4. Action: Reset Round & Section 8.1 Reset Stage Gate (`重設本關卡`) */}
+            <div className="flex items-center gap-1.5">
+              {!isCurrentStageGatePassed && (
+                <button
+                  type="button"
+                  onClick={onOpenStageGate}
+                  className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-slate-950 bg-amber-400 hover:bg-amber-300 rounded transition-colors cursor-pointer whitespace-nowrap shadow-sm"
+                  title="開啟本關卡閱讀與准入測驗"
+                >
+                  <BookOpen className="w-3 h-3" />
+                  <span>前往測驗</span>
+                </button>
+              )}
+
+              {nextRank && isCurrentStageGatePassed && isNextRankLocked && (
+                <button
+                  type="button"
+                  onClick={() => onSelectRank(nextRank)}
+                  className="flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-amber-200 bg-amber-950/80 hover:bg-amber-900 border border-amber-500/50 rounded transition-colors cursor-pointer whitespace-nowrap"
+                  title={`下一關 (${nextRank.title}) 尚未通過准入，點擊前往測驗`}
+                >
+                  <Lock className="w-3 h-3 text-amber-400" />
+                  <span>下一關：前往測驗</span>
+                </button>
+              )}
+
+              <button
+                onClick={onResetRound}
+                className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-stone-200 bg-stone-800 hover:bg-stone-700 border border-stone-600 rounded transition-colors cursor-pointer whitespace-nowrap"
+                title="重置本輪六矢箭序"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>重置箭序</span>
+              </button>
+
+              {/* Section 8.1: 重設本關卡 (requires one confirm click) */}
+              <button
+                type="button"
+                onClick={handleStageResetClick}
+                onMouseLeave={() => setConfirmingStageReset(false)}
+                className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded border transition-colors cursor-pointer whitespace-nowrap ${
+                  confirmingStageReset
+                    ? 'bg-red-600 hover:bg-red-500 text-white border-red-400 animate-pulse'
+                    : 'bg-stone-900 hover:bg-stone-800 text-amber-300 border-amber-600/50'
+                }`}
+                title="重設本關卡閱讀與測驗准入狀態（需點擊兩次確認）"
+              >
+                <ShieldAlert className="w-3 h-3" />
+                <span>{confirmingStageReset ? '確認重設本關卡？' : '重設本關卡'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

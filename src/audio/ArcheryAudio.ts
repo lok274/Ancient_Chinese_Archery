@@ -11,10 +11,15 @@ class ArcheryAudioEngine {
   private whistleHarmonicOsc: OscillatorNode | null = null;
   private whistleGain: GainNode | null = null;
 
-  // Dynamic Breathing & Heartbeat Audio Nodes
+  // Dynamic Breathing & Heartbeat Audio Nodes (Airflow + Low-Frequency Rhythmic Diaphragm Resonance)
   private breathNoiseSource: AudioBufferSourceNode | null = null;
   private breathFilter: BiquadFilterNode | null = null;
   private breathGain: GainNode | null = null;
+  private breathLowFilter: BiquadFilterNode | null = null;
+  private breathLowGain: GainNode | null = null;
+  private breathSubOsc: OscillatorNode | null = null;
+  private breathSubFilter: BiquadFilterNode | null = null;
+  private breathSubGain: GainNode | null = null;
   private isBreathingActive: boolean = false;
   private lastBreathPhase: number = 0;
   private lastHeartbeatTime: number = 0;
@@ -452,8 +457,8 @@ class ArcheryAudioEngine {
   }
 
   /**
-   * Starts the continuous procedural airflow node used for dynamic rhythmic breathing
-   * while drawing and holding the bow.
+   * Starts the continuous procedural airflow and low-frequency diaphragm resonance nodes
+   * used for dynamic rhythmic breathing while drawing and holding the bow.
    */
   public startBreathing() {
     if (this.isMuted) return;
@@ -464,7 +469,7 @@ class ArcheryAudioEngine {
     if (!this.ctx || this.isBreathingActive) return;
 
     const t = this.ctx.currentTime;
-    // Create a 3-second loopable pink-tinted airflow noise buffer
+    // Create a 3-second loopable pink/brown-tinted airflow noise buffer
     const bufferSize = this.ctx.sampleRate * 3;
     const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
     const output = noiseBuffer.getChannelData(0);
@@ -483,6 +488,7 @@ class ArcheryAudioEngine {
     this.breathNoiseSource.buffer = noiseBuffer;
     this.breathNoiseSource.loop = true;
 
+    // 1. Mid-frequency respiratory airflow layer (nasal/tracheal formant)
     this.breathFilter = this.ctx.createBiquadFilter();
     this.breathFilter.type = 'bandpass';
     this.breathFilter.frequency.setValueAtTime(520, t);
@@ -495,7 +501,38 @@ class ArcheryAudioEngine {
     this.breathFilter.connect(this.breathGain);
     this.breathGain.connect(this.ctx.destination);
 
+    // 2. Low-frequency chest/diaphragm breath resonance filter (75Hz–210Hz)
+    this.breathLowFilter = this.ctx.createBiquadFilter();
+    this.breathLowFilter.type = 'lowpass';
+    this.breathLowFilter.frequency.setValueAtTime(115, t);
+    this.breathLowFilter.Q.setValueAtTime(2.6, t);
+
+    this.breathLowGain = this.ctx.createGain();
+    this.breathLowGain.gain.setValueAtTime(0.001, t);
+
+    this.breathNoiseSource.connect(this.breathLowFilter);
+    this.breathLowFilter.connect(this.breathLowGain);
+    this.breathLowGain.connect(this.ctx.destination);
+
+    // 3. Sub-diaphragmatic rhythmic oscillator (52Hz–135Hz Dantian harmonic hum)
+    this.breathSubOsc = this.ctx.createOscillator();
+    this.breathSubOsc.type = 'triangle';
+    this.breathSubOsc.frequency.setValueAtTime(68, t);
+
+    this.breathSubFilter = this.ctx.createBiquadFilter();
+    this.breathSubFilter.type = 'lowpass';
+    this.breathSubFilter.frequency.setValueAtTime(150, t);
+    this.breathSubFilter.Q.setValueAtTime(1.4, t);
+
+    this.breathSubGain = this.ctx.createGain();
+    this.breathSubGain.gain.setValueAtTime(0.001, t);
+
+    this.breathSubOsc.connect(this.breathSubFilter);
+    this.breathSubFilter.connect(this.breathSubGain);
+    this.breathSubGain.connect(this.ctx.destination);
+
     this.breathNoiseSource.start(t);
+    this.breathSubOsc.start(t);
     this.isBreathingActive = true;
     this.lastBreathPhase = 0;
     this.lastHeartbeatTime = 0;
@@ -503,17 +540,19 @@ class ArcheryAudioEngine {
 
   /**
    * Updates the rhythmic breathing sound and somatic heartbeat in real time,
-   * synced with breathSeconds, staminaPercent, isFatigued, and isDeepBreath:
-   * - Initial Draw (0s–1.2s): Deep steady nasal inhalation (引氣入丹田)
-   * - Deep Breath Hold (Spacebar held): Breath airflow silences into a locked diaphragm hold while somatic heartbeat becomes crystal clear
-   * - Optimal Focus Window (1.2s–3.5s): Slow, calm rhythmic breath cadence synced with HUD visualizer + quiet steady heartbeat
-   * - Low Stamina / Fatigue (>3.5s or staminaPercent < 0.35): Strained, rapid heavy gasps + accelerating double-thump heartbeat
+   * modulating both volume and pitch based on `drawTension` (0..1) and `isDeepBreath`,
+   * alongside `breathSeconds`, `staminaPercent`, and `isFatigued`:
+   * - Draw Tension Scaling (0.0 -> 1.0): Volume and base pitch swell with bow tension as the ribcage and diaphragm compress under load.
+   * - Deep Breath Hold (`isDeepBreath = true`, Spacebar held): Upper airflow hushes while low-frequency Dantian resonance shifts down in pitch (~54–76Hz) and swells in warm sub-bass volume with a slow, grounded rhythm.
+   * - Optimal Focus Window (1.2s–3.5s): Calm, centered rhythmic inhalation/exhalation cycle.
+   * - Low Stamina / Fatigue (>3.5s or staminaPercent < 0.35): Strained, rapid heavy gasps + accelerating double-thump heartbeat.
    */
   public updateBreathing(
     breathSeconds: number,
     staminaPercent: number,
     isFatigued: boolean,
-    isDeepBreath: boolean = false
+    isDeepBreath: boolean = false,
+    drawTension: number = 1.0
   ) {
     if (this.isMuted) return;
     if (!this.isBreathingActive) {
@@ -522,12 +561,25 @@ class ArcheryAudioEngine {
     if (!this.ctx || !this.breathFilter || !this.breathGain) return;
 
     const t = this.ctx.currentTime;
+    const clampedTension = Math.max(0, Math.min(1, drawTension));
+    // Smooth non-linear volume envelope scaled by bow draw tension (0..1)
+    const tensionVolumeScale = 0.25 + 0.75 * Math.pow(clampedTension, 0.85);
+    // Upward pitch shift as physical draw tension increases across the bow limbs
+    const tensionPitchShift = clampedTension * 90;
+    const lowTensionPitchShift = clampedTension * 28;
+
     const lowStaminaFactor = staminaPercent < 0.4 ? (0.4 - staminaPercent) / 0.4 : 0;
     const fatigueSeverity = isFatigued ? Math.min(1.0, 0.5 + (breathSeconds - 3.8) * 0.35) : 0;
     const strainLevel = Math.min(1.0, lowStaminaFactor * 0.65 + fatigueSeverity * 0.85);
 
-    // 1. Rhythmic Breath Cadence (Inhale / Exhale formant & gain modulation)
-    const cadenceSpeed = isFatigued ? 6.2 : staminaPercent < 0.35 ? 4.4 : 2.5;
+    // 1. Rhythmic Breath Cadence (Inhale / Exhale formant, pitch & volume modulation)
+    const cadenceSpeed = isFatigued
+      ? 6.2
+      : staminaPercent < 0.35
+      ? 4.4
+      : isDeepBreath
+      ? 1.35
+      : 1.85 + clampedTension * 0.75;
     this.lastBreathPhase += cadenceSpeed * 0.016;
     const wave = Math.sin(this.lastBreathPhase); // > 0 inhale, < 0 exhale
     const cycleIntensity = Math.pow(Math.abs(wave), 0.75);
@@ -536,35 +588,91 @@ class ArcheryAudioEngine {
     let targetFreq = 540;
     let targetQ = 3.2;
 
+    // Low-frequency diaphragm resonance & sub-oscillator targets
+    let lowTargetGain = 0.028;
+    let lowTargetFreq = 120;
+    let lowTargetQ = 2.6;
+    let subTargetGain = 0.018;
+    let subTargetFreq = 72;
+
     if (isDeepBreath && !isFatigued) {
-      // Deep Breath Hold (屏息凝神): respiratory airflow hushed while holding breath in Dantian
-      targetGain = 0.004;
-      targetFreq = 240;
+      // Deep Breath Hold (屏息凝神): upper airflow hushed while low-frequency Dantian breath drops in pitch and swells in sub-bass volume
+      targetGain = (0.003 + cycleIntensity * 0.004) * tensionVolumeScale;
+      targetFreq = 210 + tensionPitchShift * 0.45 + cycleIntensity * 35;
       targetQ = 5.2;
+
+      lowTargetGain = (0.052 + cycleIntensity * 0.042) * tensionVolumeScale;
+      lowTargetFreq = 82 + lowTensionPitchShift * 0.75 + (wave >= 0 ? cycleIntensity * 24 : cycleIntensity * 12);
+      lowTargetQ = 3.6;
+
+      subTargetGain = (0.04 + cycleIntensity * 0.035) * tensionVolumeScale;
+      subTargetFreq = 54 + clampedTension * 14 + (wave >= 0 ? cycleIntensity * 8 : -cycleIntensity * 4);
     } else if (breathSeconds < 1.2) {
-      // Deep initial draw inhalation (吸氣蓄力)
+      // Deep initial draw inhalation (吸氣蓄力): pitch and volume climb with drawTension
       const inhaleEnv = Math.sin((breathSeconds / 1.2) * Math.PI);
-      targetGain = 0.055 * inhaleEnv;
-      targetFreq = 480 + inhaleEnv * 220;
+      targetGain = (0.018 + 0.045 * inhaleEnv) * tensionVolumeScale;
+      targetFreq = 430 + tensionPitchShift + inhaleEnv * 190;
       targetQ = 2.8;
+
+      lowTargetGain = (0.025 + 0.045 * inhaleEnv) * tensionVolumeScale;
+      lowTargetFreq = 105 + lowTensionPitchShift + inhaleEnv * 55;
+      lowTargetQ = 2.4;
+
+      subTargetGain = (0.018 + 0.03 * inhaleEnv) * tensionVolumeScale;
+      subTargetFreq = 66 + clampedTension * 24 + inhaleEnv * 18;
     } else if (!isFatigued && staminaPercent >= 0.35) {
-      // Optimal stable stamina window: calm, centered, meditative breathing rhythm
-      targetGain = 0.018 + cycleIntensity * 0.032;
-      targetFreq = wave >= 0 ? 520 + cycleIntensity * 140 : 390 + cycleIntensity * 90;
-      targetQ = 3.6;
-    } else {
-      // Low stamina / fatigued: heavy, strained, rapid gasping breath
-      targetGain = (0.045 + strainLevel * 0.085) * (0.35 + cycleIntensity * 0.65);
+      // Optimal stable stamina window: calm, centered, meditative breathing rhythm modulated by drawTension
+      targetGain = (0.016 + cycleIntensity * 0.032) * tensionVolumeScale;
       targetFreq =
-        wave >= 0
-          ? 680 + strainLevel * 420 * cycleIntensity
-          : 460 + strainLevel * 260 * cycleIntensity;
+        (wave >= 0 ? 470 + cycleIntensity * 130 : 350 + cycleIntensity * 85) + tensionPitchShift;
+      targetQ = 3.6;
+
+      lowTargetGain = (0.024 + cycleIntensity * 0.036) * tensionVolumeScale;
+      lowTargetFreq =
+        (wave >= 0 ? 115 + cycleIntensity * 42 : 95 + cycleIntensity * 25) + lowTensionPitchShift;
+      lowTargetQ = 2.8;
+
+      subTargetGain = (0.016 + cycleIntensity * 0.026) * tensionVolumeScale;
+      subTargetFreq =
+        68 + clampedTension * 22 + (wave >= 0 ? cycleIntensity * 14 : -cycleIntensity * 6);
+    } else {
+      // Low stamina / fatigued: heavy, strained, rapid gasping breath with elevated pitch & chest throb
+      targetGain =
+        (0.045 + strainLevel * 0.085) * (0.35 + cycleIntensity * 0.65) * tensionVolumeScale;
+      targetFreq =
+        (wave >= 0
+          ? 620 + strainLevel * 380 * cycleIntensity
+          : 430 + strainLevel * 240 * cycleIntensity) + tensionPitchShift;
       targetQ = 2.0 - strainLevel * 0.6;
+
+      lowTargetGain =
+        (0.038 + strainLevel * 0.055) * (0.4 + cycleIntensity * 0.6) * tensionVolumeScale;
+      lowTargetFreq = 135 + lowTensionPitchShift + strainLevel * 65 * cycleIntensity;
+      lowTargetQ = 2.2;
+
+      subTargetGain = (0.024 + strainLevel * 0.032) * cycleIntensity * tensionVolumeScale;
+      subTargetFreq = 78 + clampedTension * 26 + strainLevel * 28 * cycleIntensity;
     }
 
     this.breathGain.gain.setTargetAtTime(targetGain, t, 0.04);
     this.breathFilter.frequency.setTargetAtTime(targetFreq, t, 0.04);
     this.breathFilter.Q.setTargetAtTime(Math.max(1.1, targetQ), t, 0.04);
+
+    if (this.breathLowGain && this.breathLowFilter) {
+      this.breathLowGain.gain.setTargetAtTime(lowTargetGain, t, 0.045);
+      this.breathLowFilter.frequency.setTargetAtTime(lowTargetFreq, t, 0.045);
+      this.breathLowFilter.Q.setTargetAtTime(lowTargetQ, t, 0.045);
+    }
+
+    if (this.breathSubGain && this.breathSubOsc && this.breathSubFilter) {
+      this.breathSubGain.gain.setTargetAtTime(subTargetGain, t, 0.05);
+      this.breathSubOsc.frequency.setTargetAtTime(subTargetFreq, t, 0.05);
+      this.breathSubFilter.frequency.setTargetAtTime(
+        isDeepBreath ? 125 : 155 + clampedTension * 40,
+        t,
+        0.05
+      );
+    }
 
     // 2. Somatic Heartbeat Pulse ("Lub-Dub" 胸腔心跳共鳴)
     const heartInterval = isFatigued
@@ -573,7 +681,7 @@ class ArcheryAudioEngine {
       ? 0.68 - lowStaminaFactor * 0.16
       : isDeepBreath
       ? 0.74
-      : 0.92;
+      : 0.92 - clampedTension * 0.08;
 
     if (breathSeconds - this.lastHeartbeatTime >= heartInterval) {
       this.lastHeartbeatTime = breathSeconds;
@@ -581,7 +689,7 @@ class ArcheryAudioEngine {
         ? 0.22 + fatigueSeverity * 0.14
         : staminaPercent < 0.4
         ? 0.11 + lowStaminaFactor * 0.1
-        : 0.065;
+        : 0.055 + clampedTension * 0.025;
       const pulseStrength = isDeepBreath && !isFatigued ? baseStrength + 0.065 : baseStrength;
       this.playHeartbeatPulse(pulseStrength);
     }
@@ -651,7 +759,7 @@ class ArcheryAudioEngine {
   }
 
   /**
-   * Stops the continuous breathing node, optionally emitting a crisp release exhalation puff (發矢吐氣聲)
+   * Stops the continuous breathing nodes, optionally emitting a crisp release exhalation puff (發矢吐氣聲)
    */
   public stopBreathing(playExhaleOnRelease: boolean = false) {
     if (this.breathNoiseSource && this.breathGain && this.ctx) {
@@ -663,9 +771,28 @@ class ArcheryAudioEngine {
           this.breathFilter?.frequency.exponentialRampToValueAtTime(280, t + 0.16);
           this.breathGain.gain.setValueAtTime(0.075, t);
           this.breathGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+
+          if (this.breathLowFilter && this.breathLowGain) {
+            this.breathLowFilter.frequency.setValueAtTime(160, t);
+            this.breathLowFilter.frequency.exponentialRampToValueAtTime(75, t + 0.16);
+            this.breathLowGain.gain.setValueAtTime(0.055, t);
+            this.breathLowGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+          }
+
+          if (this.breathSubOsc && this.breathSubGain) {
+            this.breathSubOsc.frequency.setValueAtTime(88, t);
+            this.breathSubOsc.frequency.exponentialRampToValueAtTime(48, t + 0.16);
+            this.breathSubGain.gain.setValueAtTime(0.04, t);
+            this.breathSubGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+            this.breathSubOsc.stop(t + 0.19);
+          }
+
           this.breathNoiseSource.stop(t + 0.19);
         } else {
           this.breathGain.gain.setTargetAtTime(0.0001, t, 0.03);
+          this.breathLowGain?.gain.setTargetAtTime(0.0001, t, 0.03);
+          this.breathSubGain?.gain.setTargetAtTime(0.0001, t, 0.03);
+          this.breathSubOsc?.stop(t + 0.08);
           this.breathNoiseSource.stop(t + 0.08);
         }
       } catch {
@@ -675,6 +802,11 @@ class ArcheryAudioEngine {
     this.breathNoiseSource = null;
     this.breathFilter = null;
     this.breathGain = null;
+    this.breathLowFilter = null;
+    this.breathLowGain = null;
+    this.breathSubOsc = null;
+    this.breathSubFilter = null;
+    this.breathSubGain = null;
     this.isBreathingActive = false;
   }
 

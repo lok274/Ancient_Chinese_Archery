@@ -33,6 +33,8 @@ interface AimReticleHUDProps {
   currentBow?: BowConfig;
   aimOffsetCm?: { x: number; y: number };
   thumbAngleDeg?: number;
+  gatePassed?: boolean;
+  onOpenStageGate?: () => void;
   onActionClick?: () => void;
 }
 
@@ -48,6 +50,8 @@ export const AimReticleHUD: React.FC<AimReticleHUDProps> = ({
   currentBow = BOW_PRESETS[0],
   aimOffsetCm = { x: 0, y: 0 },
   thumbAngleDeg = 14,
+  gatePassed = true,
+  onOpenStageGate,
   onActionClick,
 }) => {
   const [isCompactHUD, setIsCompactHUD] = useState<boolean>(false);
@@ -177,7 +181,6 @@ export const AimReticleHUD: React.FC<AimReticleHUDProps> = ({
 
   const gustPhase = windState.gustPhase ?? (windState.isGusting ? 'peak' : 'calm');
   const gustIntensity = Math.max(0, Math.min(1, windState.gustIntensity ?? 0));
-  const gustDeltaAngleDeg = ((windState.gustDeltaAngle ?? 0) * 180) / Math.PI;
   const windAngleDeg = (windState.directionAngle * 180) / Math.PI;
   const gustCountdown = Math.max(0, windState.nextGustCountdownSec ?? 0);
 
@@ -185,19 +188,33 @@ export const AimReticleHUD: React.FC<AimReticleHUDProps> = ({
     <div className="absolute inset-0 pointer-events-none z-10 overflow-hidden">
       {/* =========================================================================
           TOP-LEFT PERIPHERAL HUD: Wind Conditions, Gust Forecast & Windage Offset
-          Moved away from center so the central target sightline is 100% clear
+          Section 5 Rule: When the gate is locked (!gatePassed), replace this with a
+          compact `請先完成資料閱讀與測驗` pill linking to the gate.
          ========================================================================= */}
       <div className="absolute top-16 left-4 sm:left-5 flex flex-col gap-1.5 w-68 sm:w-74 transition-opacity duration-200">
-        {/* Wind & Gust Status Bar */}
-        <div
-          className={`px-3 py-2 bg-black/55 backdrop-blur-xs border rounded-md text-amber-50 shadow-md transition-colors duration-200 ${
-            windState.isGusting
-              ? 'border-amber-500/85 shadow-[0_0_14px_rgba(245,158,11,0.28)]'
-              : gustPhase === 'building'
-              ? 'border-amber-600/65'
-              : 'border-stone-700/65'
-          }`}
-        >
+        {!gatePassed ? (
+          <button
+            type="button"
+            onClick={onOpenStageGate}
+            className="pointer-events-auto px-3.5 py-2.5 bg-amber-950/90 hover:bg-amber-900 border-2 border-amber-400/80 rounded-lg text-amber-100 shadow-xl flex items-center justify-between gap-2 cursor-pointer transition-all"
+          >
+            <span className="text-xs font-bold text-amber-200">
+              請先完成資料閱讀與測驗
+            </span>
+            <span className="px-2 py-0.5 rounded bg-amber-400 text-slate-950 text-[10px] font-bold shrink-0">
+              開啟准入
+            </span>
+          </button>
+        ) : (
+          <div
+            className={`px-3 py-2 bg-black/55 backdrop-blur-xs border rounded-md text-amber-50 shadow-md transition-colors duration-200 ${
+              windState.isGusting
+                ? 'border-amber-500/85 shadow-[0_0_14px_rgba(245,158,11,0.28)]'
+                : gustPhase === 'building'
+                ? 'border-amber-600/65'
+                : 'border-stone-700/65'
+            }`}
+          >
           {/* Row 1: Wind Speed, Direction, Compass & Gust Button */}
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-1.5">
@@ -381,6 +398,7 @@ export const AimReticleHUD: React.FC<AimReticleHUDProps> = ({
             </div>
           )}
         </div>
+        )}
       </div>
 
       {/* =========================================================================

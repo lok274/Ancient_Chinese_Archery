@@ -19,22 +19,24 @@ import { BottomControlDock } from './components/BottomControlDock';
 import { ShotScoreBanner } from './components/ShotScoreBanner';
 import { ExamSummaryModal } from './components/ExamSummaryModal';
 import { ArcheryGuideModal, GuideTab } from './components/ArcheryGuideModal';
-import { Quiver3DHUD } from './components/Quiver3DHUD';
 import { BullseyeCalligraphyEffect } from './components/BullseyeCalligraphyEffect';
 import { MaterialEvolutionLab } from './components/MaterialEvolutionLab';
 import { MechanicsOverlay } from './components/MechanicsOverlay';
 import { RelayHandoffModal } from './components/RelayHandoffModal';
 import { HKHeritagePanel } from './components/HKHeritagePanel';
+import { StageGateModal } from './components/StageGateModal';
 import { MATERIAL_TIMELINE_STAGES } from './data/inquiry/materialTimeline';
 import { useInquiryProgress } from './state/useInquiryProgress';
+import { useGateProgress } from './state/useGateProgress';
 import { useRelaySession } from './state/useRelaySession';
 import { archeryAudio } from './audio/ArcheryAudio';
 import { createStaticHistoricalNote } from './data/staticHistoricalNotes';
 
 type QueuedModalRequest =
-  | { type: 'guide'; tab?: GuideTab; missionId?: string; openDrawer?: boolean }
+  | { type: 'guide'; tab?: GuideTab; openDrawer?: boolean }
   | { type: 'hk_heritage' }
-  | { type: 'relay' };
+  | { type: 'relay' }
+  | { type: 'stage_gate'; stageId?: string };
 
 export default function App() {
   // Game Setup State
@@ -68,21 +70,34 @@ export default function App() {
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [showGuide, setShowGuide] = useState<boolean>(false);
   const [guideInitialTab, setGuideInitialTab] = useState<GuideTab>('china_olympic');
-  const [guideInitialMissionId, setGuideInitialMissionId] = useState<string | undefined>(undefined);
   const [openGuideWithDrawer, setOpenGuideWithDrawer] = useState<boolean>(false);
   const [showSummaryModal, setShowSummaryModal] = useState<boolean>(false);
   const [showHKHeritage, setShowHKHeritage] = useState<boolean>(false);
   const [showRelayModal, setShowRelayModal] = useState<boolean>(false);
 
+  // v2 Stage Gate Modal / Drawer State (`閱讀資料 -> 完成MC測驗 -> 通過准入`)
+  const [isStageGateOpen, setIsStageGateOpen] = useState<boolean>(true);
+  const [activeGateStageId, setActiveGateStageId] = useState<string>(MARTIAL_RANKS[0].id);
+  const [gateLockToastVisible, setGateLockToastVisible] = useState<boolean>(false);
+
   // v2 Material Evolution Lab Drawer State
   const [isMaterialLabOpen, setIsMaterialLabOpen] = useState<boolean>(false);
   const [materialGhostEnabled, setMaterialGhostEnabled] = useState<boolean>(false);
 
-  // v2 Inquiry Progress & Peer Relay Hooks
+  // v2 Gate Progress, Inquiry Progress & Peer Relay Hooks
+  const {
+    storageWarning: gateStorageWarning,
+    getStageGate,
+    isGatePassed,
+    updateReadingProgress,
+    recordQuestionAttempt,
+    resetStageGate,
+    mergePartnerSolvedQuestions,
+  } = useGateProgress();
+
   const {
     state: inquiryState,
-    storageWarning,
-    saveReflection,
+    storageWarning: inquiryStorageWarning,
     toggleSourceKeyword,
     toggleMechanicsOverlay,
     incrementOverlayShotCount,
@@ -104,8 +119,12 @@ export default function App() {
     clearPartnerSession,
   } = useRelaySession();
 
+  const currentStageGatePassed = isGatePassed(currentRank.id);
+  const isHeritageBadgeEarned = isGatePassed('heritage-hk');
+  const passed50mQuiz = isGatePassed('rank_xiucai');
+
   // Section 5 Interaction Locking:
-  // Inquiry missions, heritage panels, and relay handoff must be unopenable while drawProgress > 0 or stamina < 30.
+  // Any panel (including the gate) MUST be unopenable while drawProgress > 0 or stamina < 30.
   const isInteractionLocked =
     drawTension > 0.01 ||
     staminaPercent * 100 < 30 ||
@@ -115,6 +134,24 @@ export default function App() {
   const [queuedModal, setQueuedModal] = useState<QueuedModalRequest | null>(null);
   const [lockHintVisible, setLockHintVisible] = useState<boolean>(false);
 
+  const openModalImmediate = useCallback(
+    (req: QueuedModalRequest) => {
+      if (req.type === 'guide') {
+        setGuideInitialTab(req.tab || 'china_olympic');
+        setOpenGuideWithDrawer(Boolean(req.openDrawer));
+        setShowGuide(true);
+      } else if (req.type === 'hk_heritage') {
+        setShowHKHeritage(true);
+      } else if (req.type === 'relay') {
+        setShowRelayModal(true);
+      } else if (req.type === 'stage_gate') {
+        setActiveGateStageId(req.stageId || currentRank.id);
+        setIsStageGateOpen(true);
+      }
+    },
+    [currentRank.id]
+  );
+
   const requestOpenModal = useCallback(
     (req: QueuedModalRequest) => {
       if (isInteractionLocked) {
@@ -122,18 +159,9 @@ export default function App() {
         setLockHintVisible(true);
         return;
       }
-      if (req.type === 'guide') {
-        setGuideInitialTab(req.tab || 'china_olympic');
-        setGuideInitialMissionId(req.missionId);
-        setOpenGuideWithDrawer(Boolean(req.openDrawer));
-        setShowGuide(true);
-      } else if (req.type === 'hk_heritage') {
-        setShowHKHeritage(true);
-      } else if (req.type === 'relay') {
-        setShowRelayModal(true);
-      }
+      openModalImmediate(req);
     },
-    [isInteractionLocked]
+    [isInteractionLocked, openModalImmediate]
   );
 
   // Automatically flush queued modal once draw/release completes and stamina recovers
@@ -142,25 +170,33 @@ export default function App() {
       const req = queuedModal;
       setQueuedModal(null);
       setLockHintVisible(false);
-      if (req.type === 'guide') {
-        setGuideInitialTab(req.tab || 'china_olympic');
-        setGuideInitialMissionId(req.missionId);
-        setOpenGuideWithDrawer(Boolean(req.openDrawer));
-        setShowGuide(true);
-      } else if (req.type === 'hk_heritage') {
-        setShowHKHeritage(true);
-      } else if (req.type === 'relay') {
+      openModalImmediate(req);
+    }
+  }, [isInteractionLocked, queuedModal, openModalImmediate]);
+
+  // Section 8.7: When a partner relay payload is loaded, verify `questionsSolved` against the local question bank
+  // and open the RelayHandoffModal (never auto-passing an unread stage).
+  useEffect(() => {
+    if (partnerPayload) {
+      mergePartnerSolvedQuestions(
+        partnerPayload.gateCertificate.stageId,
+        partnerPayload.gateCertificate.questionsSolved
+      );
+      if (!isInteractionLocked) {
         setShowRelayModal(true);
       }
-    }
-  }, [isInteractionLocked, queuedModal]);
-
-  // Open Relay Modal automatically if URL hash contains a partner relay code or error on initial load
-  useEffect(() => {
-    if ((partnerPayload || relayError) && !isInteractionLocked) {
+    } else if (relayError && !isInteractionLocked) {
       setShowRelayModal(true);
     }
-  }, [partnerPayload, relayError]);
+  }, [partnerPayload, relayError, mergePartnerSolvedQuestions]);
+
+  // Trigger peripheral toast when user attempts to draw while gatePassed === false (Section 6)
+  const handleLockedDrawAttempt = useCallback(() => {
+    setGateLockToastVisible(true);
+    window.setTimeout(() => {
+      setGateLockToastVisible(false);
+    }, 2600);
+  }, []);
 
   // Gemini API / Static Fallback Historical Notes State (unlocked when hitting target)
   const [historicalNotes, setHistoricalNotes] = useState<HistoricalNote[]>([]);
@@ -177,8 +213,6 @@ export default function App() {
       : Math.min(TIME_OF_DAY_PHASES.length - 1, currentArrowIndex);
   const currentTimePhase = TIME_OF_DAY_PHASES[activeTimePhaseIndex];
 
-  // Fetch context-aware Olympic Team China & Chinese Archery History notes from server-side Gemini API,
-  // with automatic local fallback when hosted on pure static hosting such as GitHub Pages.
   const fetchHistoricalNoteForHit = useCallback(
     async (hitResult?: ShotResult) => {
       setIsFetchingNote(true);
@@ -217,7 +251,6 @@ export default function App() {
 
         setHistoricalNotes((prev) => [data.note as HistoricalNote, ...prev]);
       } catch {
-        // Seamless static fallback for GitHub Pages (where /api/* Express routes do not run)
         const fallbackNote = createStaticHistoricalNote(payload);
         setHistoricalNotes((prev) => [fallbackNote, ...prev]);
       } finally {
@@ -234,7 +267,7 @@ export default function App() {
     archeryAudio.setMuted(nextMute);
   }, [isMuted]);
 
-  // Handle Shot Impact: when the user hits the target (score > 0), fetch context-aware facts & increment overlay shot counter
+  // Handle Shot Impact
   const handleShotCompleted = useCallback(
     (result: ShotResult) => {
       setLastShotResult(result);
@@ -277,28 +310,30 @@ export default function App() {
     window.dispatchEvent(event);
   }, []);
 
-  // Advance to next Martial Exam Rank
+  // Switch or advance to another Martial Exam Rank
+  const handleSelectRank = useCallback(
+    (rank: MartialRank) => {
+      setCurrentRank(rank);
+      handleResetRound();
+      setActiveGateStageId(rank.id);
+      if (!isGatePassed(rank.id)) {
+        setIsStageGateOpen(true);
+      }
+    },
+    [handleResetRound, isGatePassed]
+  );
+
   const handleNextRank = useCallback(
     (nextRank: MartialRank) => {
-      setCurrentRank(nextRank);
-      handleResetRound();
+      handleSelectRank(nextRank);
     },
-    [handleResetRound]
+    [handleSelectRank]
   );
 
   // Change Bow
   const handleSelectBow = useCallback(
     (bow: BowConfig) => {
       setCurrentBow(bow);
-      handleResetRound();
-    },
-    [handleResetRound]
-  );
-
-  // Change Rank manually
-  const handleSelectRank = useCallback(
-    (rank: MartialRank) => {
-      setCurrentRank(rank);
       handleResetRound();
     },
     [handleResetRound]
@@ -325,13 +360,17 @@ export default function App() {
   // Handle HUD on-screen action click
   const handleHUDAction = useCallback(() => {
     if (gameState === 'idle') {
+      if (!currentStageGatePassed) {
+        handleLockedDrawAttempt();
+        return;
+      }
       window.dispatchEvent(new CustomEvent('ui_trigger_draw'));
     } else if (gameState === 'drawing' || gameState === 'aiming') {
       window.dispatchEvent(new CustomEvent('ui_trigger_fire'));
     } else if (gameState === 'impact') {
       handleNextArrow();
     }
-  }, [gameState, handleNextArrow]);
+  }, [gameState, currentStageGatePassed, handleLockedDrawAttempt, handleNextArrow]);
 
   const remainingInQuiver = Math.max(
     0,
@@ -360,6 +399,23 @@ export default function App() {
     0
   );
 
+  const currentRankIndex = MARTIAL_RANKS.findIndex((r) => r.id === currentRank.id);
+  const nextRankObj =
+    currentRankIndex < MARTIAL_RANKS.length - 1 ? MARTIAL_RANKS[currentRankIndex + 1] : null;
+  const isNextStageGatePassed = nextRankObj ? isGatePassed(nextRankObj.id) : false;
+
+  const activeGateRankTitle =
+    activeGateStageId === 'heritage-hk'
+      ? '香港射藝文化與內地同源展板'
+      : MARTIAL_RANKS.find((r) => r.id === activeGateStageId)?.title || currentRank.title;
+
+  const partnerPreviewBanner =
+    partnerPayload &&
+    partnerPayload.stageId === activeGateStageId &&
+    !isGatePassed(activeGateStageId)
+      ? '你的搭檔已研讀此關卡，你可以先自行閱讀資料並作答'
+      : null;
+
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-stone-950 font-serif select-none">
       {/* 1. 3D Archery Viewport Canvas */}
@@ -381,16 +437,33 @@ export default function App() {
         mechanicsOverlayEnabled={inquiryState.mechanicsOverlayEnabled}
         materialGhostStage={activeMaterialGhostStage}
         onClickHKBoard={() => requestOpenModal({ type: 'hk_heritage' })}
+        gatePassed={currentStageGatePassed}
+        onLockedDrawAttempt={handleLockedDrawAttempt}
       />
 
-      {/* Interaction Lock Subtle Peripheral Hint (Section 5: 射箭中，完成本箭後開啟) */}
+      {/* Section 5 Interaction Lock Subtle Peripheral Hint (`射箭中，完成本箭後開啟`) */}
       {lockHintVisible && (
         <div className="fixed top-14 right-4 z-40 pointer-events-none px-3.5 py-2 rounded-lg bg-amber-950/90 border border-amber-400/70 text-amber-200 text-xs font-bold shadow-xl animate-pulse">
           射箭中，完成本箭後開啟
         </div>
       )}
 
-      {/* 2. Top Bar Ritual Contract + v2 Mechanics Overlay & Inquiry Triggers */}
+      {/* Section 6 Gate-Locked Draw Attempt Peripheral Toast (`請先完成本關卡閱讀與測驗`) */}
+      {gateLockToastVisible && (
+        <div
+          onClick={() =>
+            requestOpenModal({ type: 'stage_gate', stageId: currentRank.id })
+          }
+          className="fixed top-14 right-4 z-40 pointer-events-auto cursor-pointer px-4 py-2.5 rounded-lg bg-red-950/95 border-2 border-amber-400 text-amber-200 text-xs font-bold shadow-2xl flex items-center gap-2 animate-bounce"
+        >
+          <span>請先完成本關卡閱讀與測驗</span>
+          <span className="px-2 py-0.5 rounded bg-amber-400 text-slate-950 text-[10px] font-bold">
+            點擊開啟
+          </span>
+        </div>
+      )}
+
+      {/* 2. Top Bar Ritual Contract + v2 Gate Status Badge & Mechanics Overlay Toggle */}
       <TopRitualBar
         currentRank={currentRank}
         currentArrowIndex={currentArrowIndex}
@@ -403,10 +476,11 @@ export default function App() {
         onToggleMute={handleToggleMute}
         mechanicsOverlayEnabled={inquiryState.mechanicsOverlayEnabled}
         onToggleMechanicsOverlay={toggleMechanicsOverlay}
-        onOpenHKHeritage={() => requestOpenModal({ type: 'hk_heritage' })}
-        onOpenInquiryMissions={() =>
-          requestOpenModal({ type: 'guide', tab: 'inquiry_missions', openDrawer: false })
+        gatePassed={currentStageGatePassed}
+        onOpenStageGate={() =>
+          requestOpenModal({ type: 'stage_gate', stageId: currentRank.id })
         }
+        onOpenHKHeritage={() => requestOpenModal({ type: 'hk_heritage' })}
         onOpenGuide={() =>
           requestOpenModal({
             type: 'guide',
@@ -431,25 +505,26 @@ export default function App() {
         currentBow={currentBow}
         aimOffsetCm={aimOffsetCm}
         thumbAngleDeg={thumbAngleDeg}
+        gatePassed={currentStageGatePassed}
+        onOpenStageGate={() =>
+          requestOpenModal({ type: 'stage_gate', stageId: currentRank.id })
+        }
         onActionClick={handleHUDAction}
       />
 
-      {/* 3b. v2 Mechanics Overlay (2D Draw-Force Curve + 3D Limb Stress Legend + 3-Shot Inquiry Prompt) */}
+      {/* 3b. v2 Mechanics Overlay (2D Draw-Force Curve + 3D Limb Stress Legend + Dynamic 50m Prompt) */}
       <MechanicsOverlay
         enabled={inquiryState.mechanicsOverlayEnabled}
         drawTension={drawTension}
         currentBow={currentBow}
+        passed50mQuiz={passed50mQuiz}
         overlayEnabledShotCount={inquiryState.overlayEnabledShotCount}
         dismissedTechPrompt={inquiryState.dismissedTechPrompt}
         onDismissTechPrompt={dismissTechPrompt}
-        onOpenTechMission={() =>
-          requestOpenModal({
-            type: 'guide',
-            tab: 'inquiry_missions',
-            missionId: 'M-TECH-01',
-            openDrawer: false,
-          })
+        onOpen50mQuiz={() =>
+          requestOpenModal({ type: 'stage_gate', stageId: 'rank_xiucai' })
         }
+        onOpenMaterialLab={() => setIsMaterialLabOpen(true)}
       />
 
       {/* 3c. v2 Material Evolution Lab Upward Collapsible Drawer (Bottom-Left Peripheral) */}
@@ -466,15 +541,7 @@ export default function App() {
         disabled={gameState !== 'idle'}
       />
 
-      {/* 4. Real-Time 3D Quiver HUD Component */}
-      <Quiver3DHUD
-        totalArrows={MAX_ARROWS_PER_ROUND}
-        currentArrowIndex={currentArrowIndex}
-        shotCount={shotResults.length + (gameState === 'flight' ? 1 : 0)}
-        gameState={gameState}
-      />
-
-      {/* 5. Animated Bullseye Celebration Banner */}
+      {/* 4. Animated Bullseye Celebration Banner */}
       <BullseyeCalligraphyEffect
         isActive={gameState === 'impact'}
         shotResult={lastShotResult}
@@ -498,7 +565,7 @@ export default function App() {
         />
       )}
 
-      {/* 7. Collapsible Bottom Control Dock */}
+      {/* 7. Collapsible Bottom Control Dock with Stage Gate Reset (`重設本關卡`) */}
       <BottomControlDock
         currentBow={currentBow}
         onSelectBow={handleSelectBow}
@@ -507,6 +574,16 @@ export default function App() {
         cameraMode={cameraMode}
         onSelectCameraMode={setCameraMode}
         onResetRound={handleResetRound}
+        onResetCurrentStageGate={() => {
+          resetStageGate(currentRank.id);
+          setActiveGateStageId(currentRank.id);
+          setIsStageGateOpen(true);
+        }}
+        isCurrentStageGatePassed={currentStageGatePassed}
+        isStageGatePassed={isGatePassed}
+        onOpenStageGate={() =>
+          requestOpenModal({ type: 'stage_gate', stageId: currentRank.id })
+        }
         disabled={gameState !== 'idle'}
       />
 
@@ -515,8 +592,14 @@ export default function App() {
         <ExamSummaryModal
           currentRank={currentRank}
           shotResults={shotResults}
+          isHeritageBadgeEarned={isHeritageBadgeEarned}
+          isNextStageGatePassed={isNextStageGatePassed}
           onRetry={handleResetRound}
           onNextRank={handleNextRank}
+          onOpenNextStageQuiz={(nextRank) => {
+            setShowSummaryModal(false);
+            handleSelectRank(nextRank);
+          }}
           onOpenRelayModal={() => {
             setShowSummaryModal(false);
             setShowRelayModal(true);
@@ -524,7 +607,7 @@ export default function App() {
         />
       )}
 
-      {/* 9. 5-Tab Cultural, Historical & Civic Inquiry Guide Modal */}
+      {/* 9. 4-Tab Cultural & Historical Guide Modal */}
       {showGuide && (
         <ArcheryGuideModal
           onClose={() => {
@@ -538,31 +621,21 @@ export default function App() {
           noteError={noteError}
           initialOpenDrawer={openGuideWithDrawer}
           initialTab={guideInitialTab}
-          initialMissionId={guideInitialMissionId}
           onRequestNewNote={() => fetchHistoricalNoteForHit(lastShotResult || undefined)}
-          reflections={inquiryState.reflections}
-          completedMissionIds={inquiryState.completedMissionIds}
-          sourceAnnotations={inquiryState.sourceAnnotations}
-          aiCommentary={inquiryState.aiCommentary}
-          storageWarning={storageWarning}
-          onSaveReflection={saveReflection}
-          onToggleSourceKeyword={toggleSourceKeyword}
-          onUpdateAICommentary={updateAICommentary}
         />
       )}
 
-      {/* 10. v2 Hong Kong Archery Heritage Panel (Opened from 3D side-range exhibition board) */}
+      {/* 10. v2 Hong Kong Archery Heritage Panel (with Section 8.5 `測驗你的認識` trigger) */}
       <HKHeritagePanel
         isOpen={showHKHeritage}
         onClose={() => setShowHKHeritage(false)}
+        isHeritageBadgeEarned={isHeritageBadgeEarned}
         sourceAnnotations={inquiryState.sourceAnnotations}
         onToggleSourceKeyword={toggleSourceKeyword}
-        onOpenHKMission={() => {
+        onOpenHeritageQuiz={() => {
           setShowHKHeritage(false);
-          setGuideInitialTab('inquiry_missions');
-          setGuideInitialMissionId('M-HK-01');
-          setOpenGuideWithDrawer(false);
-          setShowGuide(true);
+          setActiveGateStageId('heritage-hk');
+          setIsStageGateOpen(true);
         }}
       />
 
@@ -573,7 +646,10 @@ export default function App() {
         currentRank={currentRank}
         currentBow={currentBow}
         shotResults={shotResults}
-        missionsTouched={inquiryState.completedMissionIds}
+        currentStageGate={getStageGate(currentRank.id)}
+        isPartnerStagePassedByMe={
+          partnerPayload ? isGatePassed(partnerPayload.stageId) : currentStageGatePassed
+        }
         annotatedSourceCount={annotatedSourceCount}
         partnerPayload={partnerPayload}
         relayError={relayError}
@@ -585,6 +661,36 @@ export default function App() {
         onChangeAdjustmentReason={setAdjustmentReason}
         onChangeTeamReflection={setTeamReflection}
         onClearPartner={clearPartnerSession}
+        onOpenStageGateForPartnerStage={(partnerStageId) => {
+          const targetRank = MARTIAL_RANKS.find((r) => r.id === partnerStageId);
+          if (targetRank && targetRank.id !== currentRank.id) {
+            setCurrentRank(targetRank);
+            handleResetRound();
+          }
+          setActiveGateStageId(partnerStageId);
+          setIsStageGateOpen(true);
+        }}
+      />
+
+      {/* 12. v2 Knowledge-Gated Inquiry Modal / Peripheral Drawer (Read -> Quiz -> Pass) */}
+      <StageGateModal
+        isOpen={isStageGateOpen && !isInteractionLocked}
+        stageId={activeGateStageId}
+        stageTitle={activeGateRankTitle}
+        gate={getStageGate(activeGateStageId)}
+        storageWarning={gateStorageWarning || inquiryStorageWarning}
+        partnerPreviewBanner={partnerPreviewBanner}
+        sourceAnnotations={inquiryState.sourceAnnotations}
+        aiCommentary={inquiryState.aiCommentary}
+        onUpdateReadingProgress={(scrollPct, deltaDwellMs) =>
+          updateReadingProgress(activeGateStageId, scrollPct, deltaDwellMs)
+        }
+        onRecordAttempt={(questionId, isCorrect) =>
+          recordQuestionAttempt(activeGateStageId, questionId, isCorrect)
+        }
+        onToggleSourceKeyword={toggleSourceKeyword}
+        onUpdateAICommentary={updateAICommentary}
+        onClose={() => setIsStageGateOpen(false)}
       />
     </div>
   );

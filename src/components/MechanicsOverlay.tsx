@@ -2,50 +2,52 @@
  * Live Biomechanics & Bow Mechanics Overlay (力學疊加層：應力熱圖、拉弓力曲線與偏心輪傳動比)
  * Educational Objective: OBJ-TECH — 探究創新科技以認識國家發展
  *
- * Spatial & Instrumentation Rules:
+ * Implements Section 8.6:
  * - Strictly read-only observation of drawTension and currentBow.
- * - 2D mini-chart anchored in peripheral left/bottom-left zone, max 240px × 120px.
- * - After 3 overlay-enabled shots, surfaces the built-in inquiry prompt card linking to M-TECH-01.
+ * - 2D mini-chart anchored in peripheral left zone, max 240px × 120px.
+ * - After a student passes the 50m stage (`rank_xiucai`) quiz, the mechanics overlay's built-in inquiry prompt
+ *   is replaced with: `試運用剛才學到的原理：改變弓臂材料的彈性模量，觀察軌跡如何變化`, linking back to `MaterialEvolutionLab.tsx`.
  */
 
 import React from 'react';
-import { Activity, HelpCircle, ArrowUpRight, X } from 'lucide-react';
+import { Activity, HelpCircle, ArrowUpRight, X, FlaskConical } from 'lucide-react';
 import { BowConfig } from '../types/archery';
 
 interface MechanicsOverlayProps {
   enabled: boolean;
   drawTension: number;
   currentBow: BowConfig;
+  passed50mQuiz: boolean;
   overlayEnabledShotCount: number;
   dismissedTechPrompt: boolean;
   onDismissTechPrompt: () => void;
-  onOpenTechMission: () => void;
+  onOpen50mQuiz: () => void;
+  onOpenMaterialLab: () => void;
 }
 
 export const MechanicsOverlay: React.FC<MechanicsOverlayProps> = ({
   enabled,
   drawTension,
   currentBow,
+  passed50mQuiz,
   overlayEnabledShotCount,
   dismissedTechPrompt,
   onDismissTechPrompt,
-  onOpenTechMission,
+  onOpen50mQuiz,
+  onOpenMaterialLab,
 }) => {
   if (!enabled) return null;
 
   const peakWeightLbs = currentBow.drawWeightLbs;
   const currentDrawLengthIn = 8 + drawTension * (currentBow.drawLengthInches - 8);
 
-  // Recurve vs Compound cam force comparison (read-only derived values)
   const recurveForceLbs = Math.round(peakWeightLbs * Math.pow(drawTension, 0.92));
-  // Compound cam transmission ratio: builds rapidly to peak at 65% draw, then drops to 75% let-off valley at full draw
   const camRatio =
     drawTension < 0.65
       ? 1.15 - drawTension * 0.3
       : Math.max(0.25, 0.95 - ((drawTension - 0.65) / 0.35) * 0.7);
   const compoundHoldingLbs = Math.round(peakWeightLbs * Math.min(1, drawTension * 1.45) * camRatio);
 
-  // Generate SVG polyline paths for 240x120 mini-chart
   const chartW = 216;
   const chartH = 68;
   const recurvePoints: string[] = [];
@@ -69,7 +71,7 @@ export const MechanicsOverlay: React.FC<MechanicsOverlayProps> = ({
   const markerRecurveY =
     chartH - 6 - Math.pow(drawTension, 0.92) * (chartH - 16);
 
-  const showInquiryPrompt = overlayEnabledShotCount >= 3 && !dismissedTechPrompt;
+  const showInquiryPrompt = (passed50mQuiz || overlayEnabledShotCount >= 3) && !dismissedTechPrompt;
 
   return (
     <div className="fixed top-14 left-5 z-20 pointer-events-none flex flex-col gap-2 w-[240px]">
@@ -86,11 +88,9 @@ export const MechanicsOverlay: React.FC<MechanicsOverlayProps> = ({
         </div>
 
         <svg width={chartW} height={chartH} className="overflow-visible">
-          {/* Axes */}
           <line x1="12" y1={chartH - 6} x2={chartW - 4} y2={chartH - 6} stroke="#475569" strokeWidth="1" />
           <line x1="12" y1="6" x2="12" y2={chartH - 6} stroke="#475569" strokeWidth="1" />
 
-          {/* Compound Cam Curve (dashed sky-blue reference) */}
           <polyline
             fill="none"
             stroke="#38bdf8"
@@ -99,7 +99,6 @@ export const MechanicsOverlay: React.FC<MechanicsOverlayProps> = ({
             points={compoundPoints.join(' ')}
           />
 
-          {/* Active Recurve Limb Force Curve (solid amber-emerald) */}
           <polyline
             fill="none"
             stroke="#10b981"
@@ -107,7 +106,6 @@ export const MechanicsOverlay: React.FC<MechanicsOverlayProps> = ({
             points={recurvePoints.join(' ')}
           />
 
-          {/* Live Draw Tension Dot */}
           <circle
             cx={markerX}
             cy={markerRecurveY}
@@ -142,7 +140,7 @@ export const MechanicsOverlay: React.FC<MechanicsOverlayProps> = ({
         </span>
       </div>
 
-      {/* Built-in Inquiry Prompt after 3 overlay-enabled shots (Section 8.2) */}
+      {/* Built-in Inquiry Prompt (Section 8.6: dynamically switches once 50m quiz is passed) */}
       {showInquiryPrompt && (
         <div className="pointer-events-auto p-2.5 bg-slate-900/95 border border-amber-400/70 rounded-lg shadow-2xl text-xs space-y-1.5 animate-in fade-in duration-200">
           <div className="flex items-start justify-between gap-1">
@@ -159,17 +157,36 @@ export const MechanicsOverlay: React.FC<MechanicsOverlayProps> = ({
               <X className="w-3.5 h-3.5" />
             </button>
           </div>
-          <p className="text-[11px] text-white font-semibold leading-snug">
-            「為什麼複合弓能在保持高箭速的同時減輕拉弓負擔？」
-          </p>
-          <button
-            type="button"
-            onClick={onOpenTechMission}
-            className="w-full flex items-center justify-center gap-1 py-1 px-2 rounded bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-[11px] cursor-pointer transition-colors"
-          >
-            <span>前往 M-TECH-01 探究任務作答</span>
-            <ArrowUpRight className="w-3.5 h-3.5" />
-          </button>
+
+          {passed50mQuiz ? (
+            <>
+              <p className="text-[11px] text-emerald-200 font-semibold leading-snug">
+                試運用剛才學到的原理：改變弓臂材料的彈性模量，觀察軌跡如何變化
+              </p>
+              <button
+                type="button"
+                onClick={onOpenMaterialLab}
+                className="w-full flex items-center justify-center gap-1 py-1 px-2 rounded bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-bold text-[11px] cursor-pointer transition-colors"
+              >
+                <FlaskConical className="w-3.5 h-3.5" />
+                <span>開啟左下角「材質演化實驗室」</span>
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-[11px] text-white font-semibold leading-snug">
+                「為什麼複合弓能在保持高箭速的同時減輕拉弓負擔？」
+              </p>
+              <button
+                type="button"
+                onClick={onOpen50mQuiz}
+                className="w-full flex items-center justify-center gap-1 py-1 px-2 rounded bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-[11px] cursor-pointer transition-colors"
+              >
+                <span>前往 50m 關卡資料與測驗探究</span>
+                <ArrowUpRight className="w-3.5 h-3.5" />
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>

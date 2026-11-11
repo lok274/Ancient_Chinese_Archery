@@ -21,15 +21,12 @@ import {
 } from 'lucide-react';
 import { MartialRank, BowConfig, HistoricalNote } from '../types/archery';
 import { PostureCoachOverlay } from './PostureCoachOverlay';
-import { InquiryMissionPanel } from './InquiryMissionPanel';
-import { AICommentaryDraftState } from '../state/useInquiryProgress';
 
 export type GuideTab =
   | 'china_olympic'
   | 'chinese_history'
   | 'comparison'
-  | 'gameplay'
-  | 'inquiry_missions';
+  | 'gameplay';
 
 interface ArcheryGuideModalProps {
   onClose: () => void;
@@ -40,16 +37,7 @@ interface ArcheryGuideModalProps {
   noteError: string | null;
   initialOpenDrawer?: boolean;
   initialTab?: GuideTab;
-  initialMissionId?: string;
   onRequestNewNote: () => void;
-  reflections: Record<string, string>;
-  completedMissionIds: string[];
-  sourceAnnotations: Record<string, string[]>;
-  aiCommentary: AICommentaryDraftState;
-  storageWarning: boolean;
-  onSaveReflection: (missionId: string, text: string) => void;
-  onToggleSourceKeyword: (sourceId: string, keyword: string) => void;
-  onUpdateAICommentary: (patch: Partial<AICommentaryDraftState>) => void;
 }
 
 interface OlympicAchievementItem {
@@ -182,21 +170,11 @@ export const ArcheryGuideModal: React.FC<ArcheryGuideModalProps> = ({
   noteError,
   initialOpenDrawer = false,
   initialTab = 'china_olympic',
-  initialMissionId,
   onRequestNewNote,
-  reflections,
-  completedMissionIds,
-  sourceAnnotations,
-  aiCommentary,
-  storageWarning,
-  onSaveReflection,
-  onToggleSourceKeyword,
-  onUpdateAICommentary,
 }) => {
   const [activeTab, setActiveTab] = useState<GuideTab>(initialTab);
-  const [focusedMissionId, setFocusedMissionId] = useState<string | undefined>(initialMissionId);
   const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(
-    initialOpenDrawer || (initialTab !== 'inquiry_missions' && (historicalNotes.length > 0 || isFetchingNote))
+    initialOpenDrawer || historicalNotes.length > 0 || isFetchingNote
   );
   const [isPostureCoachOpen, setIsPostureCoachOpen] = useState<boolean>(false);
   const [selectedNoteIndex, setSelectedNoteIndex] = useState<number>(0);
@@ -337,22 +315,6 @@ export const ArcheryGuideModal: React.FC<ArcheryGuideModalProps> = ({
           >
             <Compass className="w-3.5 h-3.5" />
             <span>奧運賽制與操作指南</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('inquiry_missions');
-              setIsDrawerOpen(false);
-            }}
-            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
-              activeTab === 'inquiry_missions'
-                ? 'bg-purple-500 text-white shadow-sm'
-                : 'bg-slate-900 text-amber-300 hover:bg-slate-800 border border-amber-500/35'
-            }`}
-          >
-            <BookOpen className="w-3.5 h-3.5 text-amber-300" />
-            <span>探究任務 ({completedMissionIds.length}/4)</span>
           </button>
         </div>
 
@@ -570,7 +532,7 @@ export const ArcheryGuideModal: React.FC<ArcheryGuideModalProps> = ({
                   <ul className="space-y-2 text-slate-300">
                     <li>
                       <strong className="text-amber-200">1. 開弓與瞄準（長按滑鼠左鍵）：</strong>
-                      按住滑鼠左鍵開弓並移動滑鼠對準五色十環靶心。左上角儀表會即時計算當前風速下的「逆風修正量（cm）」與「仰角」。
+                      通過關卡知識准入後，按住滑鼠左鍵開弓並移動滑鼠對準五色十環靶心。左上角儀表會即時計算當前風速下的「逆風修正量（cm）」與「仰角」。
                     </li>
                     <li>
                       <strong className="text-amber-200">2. 屏息凝神過響片（按住 Space 鍵）：</strong>
@@ -583,22 +545,6 @@ export const ArcheryGuideModal: React.FC<ArcheryGuideModalProps> = ({
                   </ul>
                 </div>
               </div>
-            )}
-
-            {/* TAB 5: INQUIRY MISSIONS & STUDENT-AUTHORED WORKSPACE (探究任務) */}
-            {activeTab === 'inquiry_missions' && (
-              <InquiryMissionPanel
-                initialMissionId={focusedMissionId}
-                reflections={reflections}
-                completedMissionIds={completedMissionIds}
-                sourceAnnotations={sourceAnnotations}
-                aiCommentary={aiCommentary}
-                storageWarning={storageWarning}
-                onSaveReflection={onSaveReflection}
-                onToggleSourceKeyword={onToggleSourceKeyword}
-                onUpdateAICommentary={onUpdateAICommentary}
-                onOpenPostureCoachComparison={() => setIsPostureCoachOpen(true)}
-              />
             )}
           </div>
 
@@ -753,7 +699,7 @@ export const ArcheryGuideModal: React.FC<ArcheryGuideModalProps> = ({
                             射中五色十環靶即可解鎖 AI 奧運與歷史專題解說
                           </div>
                           <p className="text-[11px] text-slate-400 leading-relaxed">
-                            您也可以點擊下方按鈕，立即由 Gemini 生成關於「{currentRank.frontierPass}」的中國隊奧運成就與中華射箭史故事。
+                            您也可以點擊下方按鈕，立即由系統生成關於「{currentRank.frontierPass}」的中國隊奧運成就與中華射箭史故事。
                           </p>
                         </div>
                         <button
@@ -793,12 +739,6 @@ export const ArcheryGuideModal: React.FC<ArcheryGuideModalProps> = ({
         onClose={() => setIsPostureCoachOpen(false)}
         currentBow={currentBow}
         currentRank={currentRank}
-        onOpenMissionMRIT01={() => {
-          setIsPostureCoachOpen(false);
-          setFocusedMissionId('M-RIT-01');
-          setActiveTab('inquiry_missions');
-          setIsDrawerOpen(false);
-        }}
       />
     </div>
   );

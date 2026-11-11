@@ -2,22 +2,26 @@
  * Peer Relay Collaboration Session Hook (同儕接力協作狀態管理)
  * Educational Objective: OBJ-PEER — 透過同儕協作推動認識國家
  *
- * Constraints:
- * - Browser-only: localStorage + URL hash (#relay=<base64url>).
- * - Payload cap 2 KB (truncates shots to compact numeric records if needed).
- * - ZERO personal data or free-text reflections in the URL hash.
- * - Defensive parsing: malformed/foreign hashes show "接力碼無效" and clear the hash.
+ * Implements Section 8.7:
+ * - Handoff code: base64url(JSON) of `{ v: 2, stageId, gateCertificate, shots: { count, avgScore, bestScore, avgDrift }, quizAttempts, telemetrySummary }`.
+ * - Payload cap 2 KB. Never encode full trajectories, personal data, names, or free-text reflections.
+ * - Defensive parsing: malformed/foreign hashes show `接力碼無效` and clear the hash.
  */
 
 import { useState, useEffect, useCallback } from 'react';
 import { ShotResult } from '../types/archery';
 
-export interface CompactShotRecord {
-  idx: number;
-  s: number;      // score (0-10)
-  dCm: number;    // distanceFromCenter in cm
-  wSpd: number;   // windSpeed m/s
-  tAng: number;   // thumbAngleDeg
+export interface GateCertificate {
+  stageId: string;
+  passedAt: number;
+  questionsSolved: string[];
+}
+
+export interface RelayNumericShotsSummary {
+  count: number;
+  avgScore: number;
+  bestScore: number;
+  avgDrift: number;
 }
 
 export interface RelayTelemetrySummary {
@@ -32,10 +36,11 @@ export interface RelayTelemetrySummary {
 
 export interface RelayPayloadV2 {
   v: 2;
-  shots: CompactShotRecord[];
+  stageId: string;
+  gateCertificate: GateCertificate;
+  shots: RelayNumericShotsSummary;
+  quizAttempts: Record<string, number>;
   telemetrySummary: RelayTelemetrySummary;
-  missionsTouched: string[];
-  keywordTagIndices?: Record<string, number[]>; // sourceId -> indices of suggestedKeywords (no free text!)
 }
 
 const RELAY_STORAGE_KEY = 'olympic_archery_relay_local_v2';
@@ -65,10 +70,43 @@ function isValidRelayPayload(obj: unknown): obj is RelayPayloadV2 {
   if (!obj || typeof obj !== 'object') return false;
   const candidate = obj as Partial<RelayPayloadV2>;
   if (candidate.v !== 2) return false;
-  if (!Array.isArray(candidate.shots)) return false;
-  if (!candidate.telemetrySummary || typeof candidate.telemetrySummary !== 'object') return false;
+  if (typeof candidate.stageId !== 'string' || !candidate.stageId) return false;
+
+  const cert = candidate.gateCertificate;
+  if (
+    !cert ||
+    typeof cert !== 'object' ||
+    typeof cert.stageId !== 'string' ||
+    typeof cert.passedAt !== 'number' ||
+    !Array.isArray(cert.questionsSolved) ||
+    !cert.questionsSolved.every((q) => typeof q === 'string')
+  ) {
+    return false;
+  }
+
+  const shots = candidate.shots;
+  if (
+    !shots ||
+    typeof shots !== 'object' ||
+    typeof shots.count !== 'number' ||
+    typeof shots.avgScore !== 'number' ||
+    typeof shots.bestScore !== 'number' ||
+    typeof shots.avgDrift !== 'number'
+  ) {
+    return false;
+  }
+
+  if (!candidate.quizAttempts || typeof candidate.quizAttempts !== 'object') {
+    return false;
+  }
+  for (const [k, v] of Object.entries(candidate.quizAttempts)) {
+    if (typeof k !== 'string' || typeof v !== 'number') return false;
+  }
+
   const ts = candidate.telemetrySummary;
   if (
+    !ts ||
+    typeof ts !== 'object' ||
     typeof ts.rankId !== 'string' ||
     typeof ts.bowId !== 'string' ||
     typeof ts.totalScore !== 'number' ||
@@ -76,7 +114,7 @@ function isValidRelayPayload(obj: unknown): obj is RelayPayloadV2 {
   ) {
     return false;
   }
-  if (!Array.isArray(candidate.missionsTouched)) return false;
+
   return true;
 }
 
@@ -87,7 +125,6 @@ export function useRelaySession() {
   const [teamReflection, setTeamReflectionState] = useState<string>('');
   const [generatedCode, setGeneratedCode] = useState<string>('');
 
-  // Load local adjustment reason & reflection from localStorage (never put into URL hash)
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(RELAY_STORAGE_KEY);
@@ -105,7 +142,6 @@ export function useRelaySession() {
     }
   }, []);
 
-  // Parse URL hash #relay=<base64url> defensively on mount & hashchange
   const parseCurrentHash = useCallback(() => {
     const hash = window.location.hash || '';
     if (!hash.startsWith('#relay=')) return;
@@ -144,7 +180,6 @@ export function useRelaySession() {
     return () => window.removeEventListener('hashchange', parseCurrentHash);
   }, [parseCurrentHash]);
 
-  // Manually import a relay code or full URL pasted by Student B
   const importRelayCode = useCallback((input: string): boolean => {
     const trimmed = input.trim();
     const extracted = trimmed.includes('#relay=')
@@ -161,6 +196,9 @@ export function useRelaySession() {
         throw new Error('Payload too large');
       }
       const jsonStr = decodeBase64Url(extracted);
+      if (new TextEncoder().encode(jsonStr).length > MAX_PAYLOAD_BYTES) {
+        throw new Error('Decoded payload exceeds 2KB cap');
+      }
       const parsed = JSON.parse(jsonStr);
       if (!isValidRelayPayload(parsed)) {
         throw new Error('Schema mismatch');
@@ -181,39 +219,58 @@ export function useRelaySession() {
     }
   }, []);
 
-  // Generate a privacy-safe, <=2KB relay handoff code for Student A
   const generateRelayCode = useCallback(
     (
-      rankId: string,
+      stageId: string,
       bowId: string,
       shotResults: ShotResult[],
-      missionsTouched: string[],
+      gateCertificate: GateCertificate,
+      quizAttempts: Record<string, number>,
       annotatedSourceCount: number
     ): string => {
-      const compactShots: CompactShotRecord[] = shotResults.slice(0, 12).map((r, i) => ({
-        idx: i + 1,
-        s: r.score,
-        dCm: Math.round(Math.min(999, r.distanceFromCenter * 100) * 10) / 10,
-        wSpd: Math.round(r.windSpeed * 10) / 10,
-        tAng: Math.round(r.thumbAngleDeg ?? 14),
-      }));
-
+      const count = shotResults.length;
       const totalScore = shotResults.reduce((acc, r) => acc + r.score, 0);
-      const avgScore =
-        shotResults.length > 0 ? Math.round((totalScore / shotResults.length) * 10) / 10 : 0;
+      const avgScore = count > 0 ? Math.round((totalScore / count) * 10) / 10 : 0;
+      const bestScore = count > 0 ? Math.max(...shotResults.map((r) => r.score)) : 0;
+      const avgDrift =
+        count > 0
+          ? Math.round(
+              (shotResults.reduce((acc, r) => acc + r.distanceFromCenter * 100, 0) / count) * 10
+            ) / 10
+          : 0;
       const bullseyes = shotResults.filter((r) => r.score === 10).length;
       const avgWindSpeed =
-        shotResults.length > 0
+        count > 0
           ? Math.round(
-              (shotResults.reduce((acc, r) => acc + r.windSpeed, 0) / shotResults.length) * 10
+              (shotResults.reduce((acc, r) => acc + r.windSpeed, 0) / count) * 10
             ) / 10
           : 0;
 
+      // Sanitize quizAttempts to integer counts only
+      const cleanAttempts: Record<string, number> = {};
+      for (const [k, v] of Object.entries(quizAttempts)) {
+        if (typeof v === 'number' && Number.isFinite(v)) {
+          cleanAttempts[k] = Math.round(v);
+        }
+      }
+
       const payload: RelayPayloadV2 = {
         v: 2,
-        shots: compactShots,
+        stageId,
+        gateCertificate: {
+          stageId: gateCertificate.stageId,
+          passedAt: gateCertificate.passedAt || Date.now(),
+          questionsSolved: gateCertificate.questionsSolved.slice(0, 10),
+        },
+        shots: {
+          count,
+          avgScore,
+          bestScore,
+          avgDrift,
+        },
+        quizAttempts: cleanAttempts,
         telemetrySummary: {
-          rankId,
+          rankId: stageId,
           bowId,
           totalScore,
           avgScore,
@@ -221,16 +278,9 @@ export function useRelaySession() {
           avgWindSpeed,
           annotatedSourceCount,
         },
-        missionsTouched: missionsTouched.slice(0, 8),
       };
 
-      let jsonStr = JSON.stringify(payload);
-      // Enforce 2KB cap: truncate shots to numeric summary if needed
-      if (new TextEncoder().encode(jsonStr).length > MAX_PAYLOAD_BYTES) {
-        payload.shots = [];
-        jsonStr = JSON.stringify(payload);
-      }
-
+      const jsonStr = JSON.stringify(payload);
       const code = encodeBase64Url(jsonStr);
       setGeneratedCode(code);
       try {
