@@ -29,9 +29,20 @@ jobs:
         with:
           node-version: 20
 
-      - name: Remove platform lockfile and install dependencies
+      - name: Normalize package versions for public npm and install
         run: |
           rm -f bun.lock package-lock.json
+          node -e '
+            const fs = require("fs");
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            for (const sec of ["dependencies", "devDependencies"]) {
+              if (!pkg[sec]) continue;
+              for (const k of Object.keys(pkg[sec])) {
+                pkg[sec][k] = "latest";
+              }
+            }
+            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2));
+          '
           npm install --no-package-lock --legacy-peer-deps
 
       - name: Build static site with Vite
